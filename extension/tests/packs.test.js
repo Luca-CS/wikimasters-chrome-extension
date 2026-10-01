@@ -40,6 +40,7 @@ test("avec minuteur : le premier paquet arrive à la fin du minuteur", () => {
 
 test("lecture des minuteurs affichés", () => {
   const { parseDuration } = globalThis.WMT.dom;
+  assert.equal(parseDuration("1:43"), MIN + 43000); // format réel : « Prochain dans 1:43 »
   assert.equal(parseDuration("04:12"), 4 * MIN + 12000);
   assert.equal(parseDuration("Prochain paquet dans 04:12"), 4 * MIN + 12000);
   assert.equal(parseDuration("1:02:03"), 3723000);

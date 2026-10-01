@@ -52,6 +52,9 @@ def main():
             "emailFull": False,
             "ntfyToken": "",
             "ntfyTopic": "",
+            # Écran d'ouverture : défilement des cartes puis « Continuer » (après ton clic sur Ouvrir).
+            "autoReveal": True,
+            "revealDelay": 1500,
         },
     }
     body = json.dumps(config, ensure_ascii=False, indent=2).replace("\n", "\n  ")

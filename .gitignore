@@ -1,5 +1,4 @@
 __pycache__/
 output/
 cache/
-input/*.txt
-input/*.html
+input/

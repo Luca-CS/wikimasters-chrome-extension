@@ -163,7 +163,10 @@
 
   function refreshPulls(cards) {
     const shown = dom.reveal();
-    if (shown && !revealing) pulled = new Map(); // nouvelle ouverture de paquet
+    if (shown && !revealing) {
+      pulled = new Map(); // nouvelle ouverture de paquet
+      autoStopped = false;
+    }
     revealing = !!shown;
     for (const c of cards) {
       if (!isVisible(c.el)) {
@@ -178,6 +181,96 @@
     }
     renderPulled(shown);
     updatePacks();
+    if (shown && config.settings.autoReveal && !autoRun && !autoStopped) autoReveal();
+  }
+
+  // --- Défilement automatique de l'écran d'ouverture ---------------------------------
+  // Une fois le paquet ouvert (par toi), fait défiler ses cartes puis clique sur « Continuer ».
+  // N'ouvre jamais de paquet. Se met en pause tant qu'une vérification (« je ne suis pas un
+  // robot »…) est affichée, sans jamais y toucher, et s'arrête dès que tu cliques ou tapes.
+
+  let autoRun = null; // {abort}
+  let autoStopped = false; // arrêté pour le paquet en cours
+  const RARE = new Set(["UR", "L"]);
+
+  async function wait(job, ms) {
+    const end = Date.now() + ms;
+    while (!job.abort && Date.now() < end) await sleep(Math.min(100, end - Date.now()));
+  }
+
+  async function waitFor(job, test, ms) {
+    const end = Date.now() + ms;
+    while (!job.abort && Date.now() < end) {
+      if (test()) return true;
+      await sleep(100);
+    }
+    return false;
+  }
+
+  async function waitDialog(job) {
+    if (!dom.blockingDialog()) return;
+    note("Vérification affichée : à toi de jouer. Le défilement reprend juste après.", "warn");
+    while (!job.abort && dom.blockingDialog()) await sleep(500);
+    if (!job.abort) {
+      note(null);
+      await wait(job, 800);
+    }
+  }
+
+  async function autoReveal() {
+    const job = (autoRun = { abort: false });
+    renderAuto();
+    try {
+      for (let step = 0; step < 40 && !job.abort; step++) {
+        if (!dom.reveal()) return; // écran fermé
+        const card = dom.cards(document).find((c) => isVisible(c.el));
+        const dwell = Math.max(600, +config.settings.revealDelay || 1500) + (card && RARE.has(card.rarity) ? 2500 : 0);
+        await wait(job, dwell);
+        await waitDialog(job);
+        if (job.abort) return;
+        clearTimeout(refreshTimer);
+        refresh(); // la carte affichée est analysée avant de passer à la suivante
+        const now = dom.reveal();
+        if (!now) return;
+        const nav = dom.revealNav();
+        if (now.index >= now.total) {
+          if (nav.cont) nav.cont.click();
+          return;
+        }
+        if (!nav.next || nav.next.disabled) return;
+        nav.next.click();
+        await waitFor(job, () => {
+          const r = dom.reveal();
+          return !r || r.index !== now.index;
+        }, 5000);
+        renderAuto();
+      }
+    } finally {
+      if (autoRun === job) autoRun = null;
+      renderAuto();
+    }
+  }
+
+  function stopAuto(message) {
+    if (!autoRun) return;
+    autoRun.abort = true;
+    autoStopped = true;
+    if (message) note(message, "warn");
+  }
+
+  // Tu prends la main (clic, clavier) : le défilement s'arrête pour ce paquet.
+  for (const type of ["pointerdown", "keydown"]) {
+    document.addEventListener(type, (e) => {
+      if (e.isTrusted && autoRun) stopAuto("Défilement automatique arrêté : tu as pris la main.");
+    }, true);
+  }
+
+  function renderAuto() {
+    if (!ui || !ui.autoStatus) return;
+    const r = dom.reveal();
+    ui.autoStatus.hidden = !autoRun;
+    ui.autoStatus.textContent = autoRun && r ? `Défilement automatique · carte ${r.index} / ${r.total}` : "";
+    ui.autoStop.hidden = !autoRun;
   }
 
   function renderPulled(shown) {
@@ -428,7 +521,12 @@
       onPulls ? ref("pulledList", h("div", { class: "pulls" })) : ref("pageTags", h("div", { class: "chips" })),
       h("label", { class: "toggle" },
         h("span", {}, "Surligner les cartes à étiqueter"),
-        ref("hl", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("highlight", e.target.checked) }))));
+        ref("hl", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("highlight", e.target.checked) }))),
+      onPulls && h("label", { class: "toggle", title: "Après ton clic sur « Ouvrir » : fait défiler les cartes du paquet puis clique sur « Continuer »" },
+        h("span", {}, "Défiler les cartes puis « Continuer »"),
+        ref("auto", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("autoReveal", e.target.checked) }))),
+      onPulls && ref("autoStatus", h("p", { class: "muted", hidden: true })),
+      onPulls && ref("autoStop", h("button", { class: "link", hidden: true, onclick: () => stopAuto("Défilement automatique arrêté.") }, "Arrêter le défilement")));
 
     const sections = onPulls
       ? [
@@ -524,6 +622,7 @@
   }
 
   async function setSetting(key, value) {
+    if (key === "autoReveal" && !value) stopAuto();
     config = { ...config, settings: { ...config.settings, [key]: value } };
     memo = new Map();
     renderPanel();
@@ -538,7 +637,9 @@
     const s = config.settings;
     ui.hl.checked = !!s.highlight;
     if (route === "pulls") {
+      ui.auto.checked = !!s.autoReveal;
       renderPacks();
+      renderAuto();
       return;
     }
     ui.wd.checked = !!s.wikidata;
@@ -597,6 +698,7 @@
     observer = null;
     clearInterval(packsTimer);
     if (scanning) scanning.abort = true;
+    if (autoRun) autoRun.abort = true;
     clearHighlights();
     if (ui) ui.host.remove();
     ui = null;

@@ -69,6 +69,14 @@
           </select>
         </label>
         <label class="field inline">
+          <span>Défiler les cartes tirées puis cliquer sur « Continuer »<br><small>Une fois que tu as cliqué sur « Ouvrir ». Pause si la vérification « je ne suis pas un robot » s'affiche (c'est toi qui la valides), arrêt dès que tu cliques ou tapes au clavier.</small></span>
+          <input type="checkbox" class="switch" data-setting="autoReveal">
+        </label>
+        <label class="field inline">
+          <span>Temps d'affichage par carte (ms)<br><small>Les cartes UR et L restent 2,5 s de plus.</small></span>
+          <input type="number" min="600" max="10000" step="100" data-setting="revealDelay">
+        </label>
+        <label class="field inline">
           <span>Notification quand les paquets sont pleins</span>
           <input type="checkbox" class="switch" data-setting="notifyFull">
         </label>

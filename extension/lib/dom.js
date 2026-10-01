@@ -132,9 +132,10 @@
   }
 
   // --- Page Paquets (/pulls), relevée le 01/10/2026 ---------------------------------
-  // <div class="card-frame ..."><div><span>10</span><span> / 10</span></div><div>paquets disponibles</div></div>
-  // À 10/10 aucun minuteur n'est affiché ; pendant la recharge, on cherche un temps
-  // (« 04:12 », « 4 min 12 s »…) dans la colonne du compteur.
+  // <div class="card-frame ..."><div><span>7</span><span> / 10</span></div><div>paquets disponibles</div>
+  //   <div>Prochain dans <span class="font-mono">1:43</span></div></div>
+  // À 10/10 la ligne « Prochain dans » disparaît. On lit le temps (« 1:43 », ou au besoin
+  // « 4 min 12 s ») dans la colonne du compteur.
 
   /** Durée en ms dans un texte (« 04:12 », « 1:02:03 », « dans 4 min 12 s »), sinon null. */
   function parseDuration(t) {
@@ -189,11 +190,50 @@
     return null;
   }
 
+  /**
+   * Navigation de l'écran d'ouverture : une rangée [bouton précédent, points (un par carte),
+   * bouton suivant] et le bouton « Continuer » qui ferme l'écran. {prev, next, cont}.
+   */
+  function revealNav(doc = document) {
+    const scope = doc.querySelector("main") || doc.body;
+    const nav = { prev: null, next: null, cont: null };
+    if (!scope) return nav;
+    nav.cont = [...scope.querySelectorAll("button")].find((b) => /^Continuer$/i.test(text(b))) || null;
+    for (const row of scope.querySelectorAll("div")) {
+      const kids = [...row.children];
+      if (kids.length !== 3 || kids[0].tagName !== "BUTTON" || kids[2].tagName !== "BUTTON") continue;
+      if (kids[1].querySelectorAll("button").length < 2) continue;
+      nav.prev = kids[0];
+      nav.next = kids[2];
+      break;
+    }
+    return nav;
+  }
+
+  const shown = (el) => (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
+
+  /**
+   * Fenêtre bloquante affichée (dont la vérification « je ne suis pas un robot ») : l'extension
+   * n'y touche jamais, elle attend que tu t'en occupes.
+   */
+  function blockingDialog(doc = document) {
+    for (const el of doc.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')) {
+      if (!el.closest("#wmt-host") && shown(el)) return true;
+    }
+    for (const el of doc.querySelectorAll("label, span, p, div, h2, h3")) {
+      if (leaf(el) && /robot/i.test(text(el)) && shown(el)) return true;
+    }
+    return false;
+  }
+
   /** Première phrase d'un extrait Wikipédia (celle qui définit le sujet). */
   function firstSentence(t) {
     const m = String(t || "").match(/^(.{20,}?[.!?])(?:\s|$)/);
     return (m ? m[1] : String(t || "")).slice(0, 240);
   }
 
-  WMT.dom = { clean, pager, cardElements, readCard, cards, activeFilters, hexColor, packs, parseDuration, reveal, firstSentence };
+  WMT.dom = {
+    clean, pager, cardElements, readCard, cards, activeFilters, hexColor,
+    packs, parseDuration, reveal, revealNav, blockingDialog, firstSentence,
+  };
 })(globalThis);

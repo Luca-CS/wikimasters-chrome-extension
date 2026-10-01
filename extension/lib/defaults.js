@@ -591,7 +591,9 @@
       "notifyEach": false,
       "emailFull": false,
       "ntfyToken": "",
-      "ntfyTopic": ""
+      "ntfyTopic": "",
+      "autoReveal": true,
+      "revealDelay": 1500
     }
   };
   WMT.defaults = { config: () => JSON.parse(JSON.stringify(DEFAULTS)) };
