@@ -45,6 +45,13 @@ def main():
             "highlight": True,
             "highlightStyle": "ring",
             "autoPrompt": True,
+            # Rappels de paquets : 1 paquet / 10 min en gratuit, / 3 min en Pro, jusqu'à 10.
+            "accountType": "free",
+            "notifyFull": True,
+            "notifyEach": False,
+            "emailFull": False,
+            "ntfyToken": "",
+            "ntfyTopic": "",
         },
     }
     body = json.dumps(config, ensure_ascii=False, indent=2).replace("\n", "\n  ")

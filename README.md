@@ -50,6 +50,34 @@ politesse demandée par Wikimedia.
 Les noms d'étiquettes doivent être **exactement ceux du jeu**. Les couleurs sont
 reprises automatiquement du jeu dès qu'une étiquette apparaît sur une carte.
 
+### Paquets : rappels et cartes tirées
+
+L'extension n'ouvre **jamais** de paquet et ne touche à rien sur la page Paquets :
+elle se contente de lire ce qui s'affiche.
+
+- **Rappels.** Chaque fois que tu passes sur la page Paquets, l'extension relève
+  ton compteur (« 7 / 10 paquets disponibles »). Elle en déduit quand ton stock
+  sera plein, selon ton type de compte : 1 paquet toutes les 10 min en gratuit,
+  toutes les 3 min en Pro, jusqu'à 10. Le nombre estimé s'affiche sur l'icône de
+  l'extension, et tu reçois une notification quand c'est plein. Il y a aussi une
+  option pour être prévenu à chaque nouveau paquet. C'est une estimation : si tu
+  ouvres des paquets depuis un autre appareil, elle se recale à ta prochaine
+  visite de la page Paquets dans ce navigateur. Chrome doit être ouvert pour
+  recevoir les rappels.
+- **E-mail quand c'est plein**, via [ntfy.sh](https://ntfy.sh) (gratuit, 5
+  e-mails par jour au plus). Crée un compte, vérifie ton adresse dans Account,
+  crée un jeton d'accès, puis colle-le dans Config → Paquets et rappels, et
+  teste avec « Tester l'e-mail ». L'appli ntfy abonnée au topic affiché reçoit
+  aussi les rappels sur ton téléphone.
+- **Cartes tirées.** Pendant l'ouverture d'un paquet, chaque carte affichée est
+  analysée. Le panneau récapitule les cartes du paquet avec leurs étiquettes
+  suggérées, et la carte à l'écran est surlignée. Une carte n'est analysée
+  qu'une fois visible, donc pas de divulgâchage.
+
+Si le site change et que quelque chose ne marche plus, le lien **« Exporter la
+page »** du panneau enregistre le HTML de la page, sans tes identifiants. Il
+suffit de le déposer dans `input/` pour adapter l'extension.
+
 ## Script Python
 
 Le script n'envoie **aucune requête à WikiMasters** : il lit des fichiers texte

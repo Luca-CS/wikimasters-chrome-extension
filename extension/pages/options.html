@@ -24,6 +24,7 @@
       <a href="#tags">Étiquettes</a>
       <a href="#tester">Tester les règles</a>
       <a href="#themes">Thèmes candidats</a>
+      <a href="#packs">Paquets et rappels</a>
       <a href="#analyse">Analyse</a>
       <a href="#data">Données</a>
     </nav>
@@ -54,6 +55,55 @@
         (onglet « Nouveaux thèmes » du rapport). « Activer » en fait une étiquette.
       </p>
       <div class="rules" id="themes-list"></div>
+    </section>
+
+    <section class="group" id="packs">
+      <div class="ghead"><h2>Paquets et rappels</h2></div>
+      <p class="d pad" id="packs-info"></p>
+      <div class="form">
+        <label class="field inline">
+          <span>Type de compte<br><small>Gratuit : 1 paquet toutes les 10 min. Pro : toutes les 3 min. Jusqu'à 10 en stock.</small></span>
+          <select data-setting="accountType">
+            <option value="free">Gratuit (10 min)</option>
+            <option value="pro">Pro (3 min)</option>
+          </select>
+        </label>
+        <label class="field inline">
+          <span>Notification quand les paquets sont pleins</span>
+          <input type="checkbox" class="switch" data-setting="notifyFull">
+        </label>
+        <label class="field inline">
+          <span>Notification à chaque nouveau paquet</span>
+          <input type="checkbox" class="switch" data-setting="notifyEach">
+        </label>
+        <label class="field inline">
+          <span>E-mail quand les paquets sont pleins<br><small>Envoyé par ntfy.sh (gratuit, 5 e-mails par jour au plus).</small></span>
+          <input type="checkbox" class="switch" data-setting="emailFull">
+        </label>
+        <div class="field">
+          <span>Configurer l'e-mail (une seule fois)</span>
+          <ol class="steps">
+            <li>Crée un compte gratuit sur <a href="https://ntfy.sh/signup" target="_blank" rel="noopener">ntfy.sh</a>.</li>
+            <li>Dans <a href="https://ntfy.sh/account" target="_blank" rel="noopener">Account</a>, ajoute ton adresse e-mail et vérifie-la : c'est là que les rappels arriveront.</li>
+            <li>Toujours dans Account, crée un jeton d'accès (« Access tokens ») et colle-le ci-dessous.</li>
+            <li>En bonus, l'app ntfy sur ton téléphone, abonnée au topic ci-dessous, reçoit aussi les rappels en notification push.</li>
+          </ol>
+        </div>
+        <label class="field">
+          <span>Jeton d'accès ntfy</span>
+          <input type="password" data-setting="ntfyToken" placeholder="tk_…" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Topic ntfy</span>
+          <input type="text" data-setting="ntfyTopic" spellcheck="false">
+          <small>Nom de canal généré au hasard : garde-le pour toi, quiconque le connaît peut lire les rappels.</small>
+        </label>
+        <div class="row-btns tight">
+          <button class="btn" id="test-notif">Tester la notification</button>
+          <button class="btn" id="test-mail">Tester l'e-mail</button>
+          <span class="muted" id="test-result"></span>
+        </div>
+      </div>
     </section>
 
     <section class="group" id="analyse">
@@ -109,6 +159,7 @@
   <script src="../lib/core.js"></script>
   <script src="../lib/defaults.js"></script>
   <script src="../lib/store.js"></script>
+  <script src="../lib/packs.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

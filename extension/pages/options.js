@@ -205,6 +205,41 @@ function fillSettings() {
   }
 }
 
+// --- Paquets et rappels ------------------------------------------------------------------
+
+function randomTopic() {
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  return "wikimasters-" + [...bytes].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+}
+
+async function renderPacksInfo() {
+  const state = await store.get("packs");
+  const s = config.settings;
+  const est = WMT.packs.estimate(state, WMT.packs.cooldownMs(s));
+  let text = state
+    ? `Dernier relevé sur la page Paquets : ${state.count} / ${state.max} à ${WMT.packs.fmtTime(state.at)}. ` +
+      `Estimation actuelle : ${est.count} / ${est.max}, ${WMT.packs.describe(est)}.`
+    : "Pas encore de relevé : passe sur la page Paquets de WikiMasters avec l'extension active.";
+  if (s.emailFull && !s.ntfyToken) text += " Renseigne ton jeton ntfy pour recevoir l'e-mail.";
+  byId("packs-info").textContent = text;
+}
+
+async function testNotify(email) {
+  const out = byId("test-result");
+  out.textContent = "Envoi…";
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    await save(); // le jeton ou le topic viennent peut-être d'être saisis
+  }
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "testNotify", email });
+    if (!res || !res.ok) throw new Error((res && res.error) || "pas de réponse de l'extension");
+    out.textContent = email ? "✓ Notification et e-mail envoyés (vérifie aussi tes spams)." : "✓ Notification envoyée.";
+  } catch (e) {
+    out.textContent = `✗ ${e.message}`;
+  }
+}
+
 // --- Données -----------------------------------------------------------------------------
 
 async function renderDataInfo() {
@@ -274,6 +309,10 @@ function renderAll() {
 async function init() {
   config = await store.getConfig();
   lastSaved = JSON.stringify(config);
+  if (!config.settings.ntfyTopic) {
+    config.settings = { ...config.settings, ntfyTopic: randomTopic() };
+    await save();
+  }
   renderAll();
   bindSettings();
   bindData();
@@ -281,9 +320,14 @@ async function init() {
   byId("add-theme").addEventListener("click", () => addRule("themes"));
   byId("t-title").addEventListener("input", runTester);
   byId("t-desc").addEventListener("input", runTester);
+  byId("test-notif").addEventListener("click", () => testNotify(false));
+  byId("test-mail").addEventListener("click", () => testNotify(true));
   renderDataInfo();
+  renderPacksInfo();
+  setInterval(renderPacksInfo, 30000);
   store.onChange(async (ch) => {
     if (ch.scanMeta || ch.wd) renderDataInfo();
+    if (ch.packs || ch.config) renderPacksInfo();
     // Changement venu d'ailleurs (couleurs reprises du jeu, rapport…) : on recharge si rien n'est en cours ici.
     if (ch.config && !saveTimer && JSON.stringify(ch.config.newValue) !== lastSaved) {
       config = await store.getConfig();

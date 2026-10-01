@@ -1,12 +1,16 @@
-// Content script WikiMasters : panneau « Tagger » sur la page Collection, analyse de toutes
-// les pages (lecture du DOM + clic sur « Suivant → », avec une pause entre deux pages) et
-// surlignage des cartes à étiqueter. L'extension ne pose jamais d'étiquette elle-même.
+// Content script WikiMasters, en lecture seule :
+// - page Collection : panneau « Tagger », analyse de toutes les pages (lecture du DOM + clic sur
+//   « Suivant → », avec une pause entre deux pages) et surlignage des cartes à étiqueter ;
+// - page Paquets : relevé du compteur de paquets (pour les rappels) et étiquettes suggérées pour
+//   les cartes tirées.
+// L'extension ne pose jamais d'étiquette et n'ouvre jamais de paquet : ça reste manuel.
 (() => {
   if (window.top !== window || window.__wmtLoaded) return;
   window.__wmtLoaded = true;
 
-  const { core, dom, store } = WMT;
-  const isCollection = () => location.pathname.replace(/\/+$/, "") === "/collection";
+  const { core, dom, store, packs } = WMT;
+  const ROUTES = { "/collection": "collection", "/pulls": "pulls" };
+  const routeOf = () => ROUTES[location.pathname.replace(/\/+$/, "")] || null;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const fmtDate = (t) =>
     new Date(t).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -17,11 +21,13 @@
   let rules = []; // règles compilées
   let wd = null; // cache Wikidata
   let scanMeta = null; // {at, n, pages}
+  let packsState = null; // dernier relevé du compteur de paquets
   let memo = new Map(); // "titre\ndescription" -> suggestions
-  let active = false;
+  let route = null; // page gérée affichée : "collection", "pulls" ou null
   let ui = null;
   let observer = null;
   let refreshTimer = 0;
+  let packsTimer = 0;
   let scanning = null; // {abort}
   let focusTag = null;
 
@@ -32,6 +38,7 @@
     rules = core.compileRules(config.rules);
     wd = await store.get("wd");
     scanMeta = await store.get("scanMeta");
+    packsState = await store.get("packs");
     memo = new Map();
   }
 
@@ -47,7 +54,8 @@
         memo = new Map();
       }
       if (ch.scanMeta) scanMeta = ch.scanMeta.newValue || null;
-      if (active) {
+      if (ch.packs) packsState = ch.packs.newValue || null;
+      if (route) {
         renderPanel();
         scheduleRefresh();
       }
@@ -127,20 +135,72 @@
   }
 
   function refresh() {
-    if (!active) return;
+    if (!route) return;
     const cards = dom.cards(document, knownTags());
-    const perTag = new Map();
     const colors = {};
+    cards.forEach((c) => Object.assign(colors, c.colors));
+    syncColors(colors);
+    if (route === "pulls") return refreshPulls(cards);
+    const perTag = new Map();
     let todo = 0;
     for (const c of cards) {
-      Object.assign(colors, c.colors);
       const matches = suggestionsFor(c);
       if (matches.length) todo++;
       for (const m of matches) perTag.set(m.tag, (perTag.get(m.tag) || 0) + 1);
       paint(c, config.settings.highlight ? matches : []);
     }
-    syncColors(colors);
     renderPage(cards.length, todo, perTag);
+  }
+
+  // --- Page Paquets : cartes tirées ----------------------------------------------------
+
+  let pulled = new Map(); // titre -> {card, matches}, pour l'ouverture de paquet en cours
+  let revealing = false;
+
+  // Une carte n'est analysée qu'une fois visible : pas de divulgâchage pendant l'ouverture.
+  const isVisible = (el) =>
+    el.checkVisibility ? el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) : el.offsetParent !== null;
+
+  function refreshPulls(cards) {
+    const shown = dom.reveal();
+    if (shown && !revealing) pulled = new Map(); // nouvelle ouverture de paquet
+    revealing = !!shown;
+    for (const c of cards) {
+      if (!isVisible(c.el)) {
+        paint(c, []);
+        continue;
+      }
+      // L'écran d'ouverture affiche l'extrait complet : on ne garde que la phrase de définition.
+      const card = { ...c, desc: dom.firstSentence(c.desc) };
+      const matches = suggestionsFor(card);
+      pulled.set(card.title, { card, matches });
+      paint(c, config.settings.highlight ? matches : []);
+    }
+    renderPulled(shown);
+    updatePacks();
+  }
+
+  function renderPulled(shown) {
+    if (!ui || !ui.pulledList) return;
+    const list = [...pulled.values()];
+    const todo = list.filter((x) => x.matches.length).length;
+    ui.pageCount.textContent = list.length
+      ? `${plural(todo, "carte")} à étiqueter sur ${list.length}` + (shown ? ` · carte ${shown.index} / ${shown.total}` : "")
+      : "Ouvre un paquet : les cartes tirées s'afficheront ici avec leurs étiquettes suggérées.";
+    ui.pulledList.replaceChildren(...list.map(({ card, matches }) => {
+      const rarity = h("span", { class: "rar" }, card.rarity || "?");
+      rarity.style.background = `var(--color-rarity-${(card.rarity || "c").toLowerCase()}, #b8f2d5)`;
+      const tags = matches.length
+        ? matches.map((m) => {
+            const t = h("span", { class: "tag", title: `Motifs : ${m.hits.join(", ")}` }, m.tag);
+            t.style.setProperty("--c", colorOf(m.tag));
+            return t;
+          })
+        : [h("span", { class: "muted" }, card.tags.length ? "déjà étiquetée" : "aucune suggestion")];
+      return h("div", { class: "pull" }, rarity, h("span", { class: "t" }, card.title), tags);
+    }));
+    ui.fabN.hidden = !todo;
+    ui.fabN.textContent = String(todo);
   }
 
   function scheduleRefresh() {
@@ -161,7 +221,51 @@
     }
   }
 
-  // --- Analyse de toutes les pages -------------------------------------------------
+  // --- Paquets : relevé du compteur (les rappels sont programmés par background.js) ----
+
+  let packsWriting = false;
+
+  async function updatePacks() {
+    const live = dom.packs();
+    renderPacks(live);
+    if (!live || packsWriting) return;
+    const now = Date.now();
+    const cooldown = packs.cooldownMs(config.settings);
+    const before = packs.estimate(packsState, cooldown, now);
+    let next = null;
+    if (live.nextMs != null) {
+      // Minuteur affiché : relevé exact, réécrit seulement si la prévision bouge vraiment.
+      const cand = { count: live.count, max: live.max, at: now, nextMs: live.nextMs };
+      const after = packs.estimate(cand, cooldown, now);
+      if (!before || after.count !== before.count || after.max !== before.max || Math.abs(after.fullAt - before.fullAt) > 5000) next = cand;
+    } else if (!before || before.count !== live.count || before.max !== live.max) {
+      next = { count: live.count, max: live.max, at: now, nextMs: null };
+    }
+    if (!next) return;
+    packsState = next;
+    packsWriting = true;
+    await safe(() => store.set("packs", next));
+    packsWriting = false;
+    renderPacks(live);
+  }
+
+  function renderPacks(live = dom.packs()) {
+    if (!ui || !ui.packCount) return;
+    const s = config.settings;
+    const est = packs.estimate(packsState, packs.cooldownMs(s));
+    const count = live ? live.count : est && est.count;
+    const max = live ? live.max : est && est.max;
+    if (live) ui.packCount.textContent = `${count} / ${max} paquets disponibles`;
+    else if (est) ui.packCount.textContent = `≈ ${count} / ${max} paquets disponibles (estimation)`;
+    else ui.packCount.textContent = "Compteur pas encore relevé.";
+    const plan = s.accountType === "pro" ? "Pro, 1 paquet / 3 min" : "gratuit, 1 paquet / 10 min";
+    ui.packInfo.textContent = est ? `${packs.describe(est)} · compte ${plan}` : `Compte ${plan}.`;
+    const channels = [s.notifyFull && "notification", s.emailFull && "e-mail"].filter(Boolean);
+    ui.packNotif.textContent = channels.length ? `Rappel quand c'est plein : ${channels.join(" + ")}.` : "Aucun rappel activé.";
+    ui.fabLabel.textContent = count != null ? `Tagger · ${count}/${max}` : "Tagger";
+  }
+
+  // --- Analyse de toutes les pages de la collection ----------------------------------
 
   const signature = () => dom.cardElements().map((c) => c.h3.textContent).join("\u0001");
 
@@ -187,7 +291,7 @@
   }
 
   async function runScan(ignoreFilters = false) {
-    if (scanning) return;
+    if (scanning || route !== "collection") return;
     const filters = dom.activeFilters();
     if (filters.length && !ignoreFilters) {
       setOpen(true);
@@ -239,8 +343,10 @@
       else note(`Analyse interrompue : ${e.message}`, "err");
     } finally {
       scanning = null;
-      ui.progress.hidden = true;
-      renderPanel();
+      if (ui) {
+        ui.progress.hidden = true;
+        renderPanel();
+      }
     }
   }
 
@@ -249,6 +355,26 @@
     ui.progress.hidden = false;
     ui.bar.style.width = `${Math.round((100 * pages.size) / p.total)}%`;
     ui.ptext.textContent = `Page ${p.page} / ${p.total} · ${plural(n, "carte")} lues`;
+  }
+
+  // --- Export de la page (diagnostic, pour adapter l'extension si le site change) -----
+
+  function exportPage() {
+    const main = (document.querySelector("main") || document.body).cloneNode(true);
+    main.querySelectorAll("script, style, #wmt-host, .wmt-flags").forEach((n) => n.remove());
+    main.querySelectorAll("[data-wmt], [data-wmt-ring]").forEach((n) => {
+      n.removeAttribute("data-wmt");
+      n.removeAttribute("data-wmt-ring");
+      n.style.removeProperty("--wmt-c");
+    });
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const html = `${location.href}\n<!-- Exporté par WikiMasters Tagger le ${new Date().toLocaleString("fr-FR")} -->\n${main.outerHTML}\n`;
+    const a = h("a", { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: `wikimasters-${route || "page"}-${stamp}.html` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    note("Page exportée dans tes téléchargements (uniquement la zone principale, sans tes identifiants).", "ok");
   }
 
   // --- Panneau ---------------------------------------------------------------------
@@ -294,54 +420,73 @@
     shadow.adoptedStyleSheets = [sheet];
     const r = {};
     const ref = (name, el) => (r[name] = el);
+    const onPulls = route === "pulls";
+
+    const cardsSection = h("section", {},
+      h("h4", {}, onPulls ? "Cartes tirées" : "Cette page"),
+      ref("pageCount", h("div", { class: "big" }, "…")),
+      onPulls ? ref("pulledList", h("div", { class: "pulls" })) : ref("pageTags", h("div", { class: "chips" })),
+      h("label", { class: "toggle" },
+        h("span", {}, "Surligner les cartes à étiqueter"),
+        ref("hl", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("highlight", e.target.checked) }))));
+
+    const sections = onPulls
+      ? [
+          h("section", {},
+            h("h4", {}, "Paquets"),
+            ref("packCount", h("div", { class: "big" }, "…")),
+            ref("packInfo", h("p", { class: "muted" })),
+            ref("packNotif", h("p", { class: "muted" })),
+            h("button", { class: "link", onclick: () => openPage("options", false, "#packs") }, "Régler les rappels et le type de compte"),
+            ref("note", h("div", { class: "note", hidden: true }))),
+          cardsSection,
+        ]
+      : [
+          ref("prompt", h("section", { class: "prompt", hidden: true },
+            h("div", { class: "big" }, "Analyser ta collection ?"),
+            ref("promptText", h("p", { class: "muted" })),
+            h("div", { class: "row" },
+              h("button", { class: "btn primary", onclick: () => runScan() }, "Lancer l'analyse"),
+              h("button", { class: "btn", onclick: later }, "Plus tard")))),
+          cardsSection,
+          h("section", {},
+            h("h4", {}, "Collection"),
+            ref("scanInfo", h("div", { class: "muted" })),
+            ref("progress", h("div", { hidden: true },
+              h("div", { class: "bar" }, ref("bar", h("i"))),
+              ref("ptext", h("div", { class: "muted" })))),
+            ref("note", h("div", { class: "note", hidden: true })),
+            ref("scanBtn", h("button", { class: "btn primary", onclick: () => runScan() }, "Analyser toute la collection")),
+            ref("stopBtn", h("button", { class: "btn", hidden: true, onclick: () => scanning && (scanning.abort = true) }, "Arrêter l'analyse")),
+            ref("homeBtn", h("button", { class: "btn", hidden: true, onclick: () => location.reload() }, "↺ Revenir à la page 1"))),
+          h("section", {},
+            h("h4", {}, "Catégorisation"),
+            h("label", { class: "toggle" },
+              h("span", {}, "Enrichir avec Wikidata"),
+              ref("wd", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("wikidata", e.target.checked) }))),
+            ref("wdHint", h("p", { class: "muted small", hidden: true }, "Ajoute ton e-mail dans la config : Wikimedia demande un moyen de contact.")),
+            ref("catBtn", h("button", { class: "btn", onclick: () => openPage("report", true) }, "Catégoriser et ouvrir le rapport"))),
+        ];
 
     const panel = ref("panel", h("div", { class: "panel", hidden: true },
       h("header", {},
         h("b", {}, "Wiki", h("em", {}, "Masters"), " Tagger"),
         h("button", { class: "icon", title: "Réduire", onclick: () => setOpen(false) }, "–")),
-      ref("prompt", h("section", { class: "prompt", hidden: true },
-        h("div", { class: "big" }, "Analyser ta collection ?"),
-        ref("promptText", h("p", { class: "muted" })),
-        h("div", { class: "row" },
-          h("button", { class: "btn primary", onclick: () => runScan() }, "Lancer l'analyse"),
-          h("button", { class: "btn", onclick: later }, "Plus tard")))),
-      h("section", {},
-        h("h4", {}, "Cette page"),
-        ref("pageCount", h("div", { class: "big" }, "…")),
-        ref("pageTags", h("div", { class: "chips" })),
-        h("label", { class: "toggle" },
-          h("span", {}, "Surligner les cartes à étiqueter"),
-          ref("hl", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("highlight", e.target.checked) })))),
-      h("section", {},
-        h("h4", {}, "Collection"),
-        ref("scanInfo", h("div", { class: "muted" })),
-        ref("progress", h("div", { hidden: true },
-          h("div", { class: "bar" }, ref("bar", h("i"))),
-          ref("ptext", h("div", { class: "muted" })))),
-        ref("note", h("div", { class: "note", hidden: true })),
-        ref("scanBtn", h("button", { class: "btn primary", onclick: () => runScan() }, "Analyser toute la collection")),
-        ref("stopBtn", h("button", { class: "btn", hidden: true, onclick: () => scanning && (scanning.abort = true) }, "Arrêter l'analyse")),
-        ref("homeBtn", h("button", { class: "btn", hidden: true, onclick: () => location.reload() }, "↺ Revenir à la page 1"))),
-      h("section", {},
-        h("h4", {}, "Catégorisation"),
-        h("label", { class: "toggle" },
-          h("span", {}, "Enrichir avec Wikidata"),
-          ref("wd", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("wikidata", e.target.checked) }))),
-        ref("wdHint", h("p", { class: "muted small", hidden: true }, "Ajoute ton e-mail dans la config : Wikimedia demande un moyen de contact.")),
-        ref("catBtn", h("button", { class: "btn", onclick: () => openPage("report", true) }, "Catégoriser et ouvrir le rapport"))),
+      sections,
       h("footer", {},
         h("a", { onclick: () => openPage("report") }, "Rapport"),
-        h("a", { onclick: () => openPage("options") }, "Config"))));
+        h("a", { onclick: () => openPage("options") }, "Config"),
+        h("a", { title: "Enregistre le HTML de la page pour adapter l'extension si le site change", onclick: exportPage }, "Exporter la page"))));
 
     const fab = ref("fab", h("button", { class: "fab", title: "WikiMasters Tagger", onclick: () => setOpen(true) },
       h("span", { class: "dot" }, tagIcon()),
-      h("span", {}, "Tagger"),
+      ref("fabLabel", h("span", {}, "Tagger")),
       ref("fabN", h("span", { class: "n", hidden: true }))));
 
     shadow.append(h("div", { class: "root" }, panel, fab));
     document.body.append(host);
     ui = { host, ...r };
-    setOpen(sessionStorage.getItem("wmt-open") === "1");
+    setOpen(sessionStorage.getItem(`wmt-open-${route}`) === "1");
     renderPanel();
   }
 
@@ -349,11 +494,11 @@
     if (!ui) return;
     ui.panel.hidden = !open;
     ui.fab.hidden = open;
-    sessionStorage.setItem("wmt-open", open ? "1" : "0");
+    sessionStorage.setItem(`wmt-open-${route}`, open ? "1" : "0");
   }
 
   function note(text, kind = "", action = null) {
-    if (!ui) return;
+    if (!ui || !ui.note) return;
     ui.note.hidden = !text;
     ui.note.className = `note ${kind}`;
     ui.note.replaceChildren(text || "");
@@ -366,6 +511,7 @@
   }
 
   function maybePrompt() {
+    if (route !== "collection") return;
     const stale = !scanMeta || Date.now() - scanMeta.at > 24 * 3600 * 1000;
     if (!config.settings.autoPrompt || !stale || sessionStorage.getItem("wmt-later")) return;
     ui.prompt.hidden = false;
@@ -385,12 +531,16 @@
     await safe(() => store.saveConfig(config));
   }
 
-  const openPage = (page, run = false) => safe(() => chrome.runtime.sendMessage({ type: "open", page, run }));
+  const openPage = (page, run = false, hash = "") => safe(() => chrome.runtime.sendMessage({ type: "open", page, run, hash }));
 
   function renderPanel() {
     if (!ui) return;
     const s = config.settings;
     ui.hl.checked = !!s.highlight;
+    if (route === "pulls") {
+      renderPacks();
+      return;
+    }
     ui.wd.checked = !!s.wikidata;
     ui.wdHint.hidden = !(s.wikidata && !s.contact);
     ui.scanInfo.textContent = scanMeta
@@ -405,6 +555,7 @@
   function renderPage(n, todo, perTag) {
     if (!ui) return;
     ui.pageCount.textContent = n ? `${plural(todo, "carte")} à étiqueter sur ${n}` : "Aucune carte détectée sur cette page.";
+    if (focusTag && !perTag.has(focusTag)) focusTag = null;
     const order = config.rules.map((r) => r.name);
     ui.pageTags.replaceChildren(...[...perTag]
       .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
@@ -436,6 +587,7 @@
     buildPanel();
     observer = new MutationObserver(onMutations);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    if (route === "pulls") packsTimer = setInterval(() => renderPacks(), 30000);
     refresh();
     maybePrompt();
   }
@@ -443,23 +595,26 @@
   function unmount() {
     if (observer) observer.disconnect();
     observer = null;
+    clearInterval(packsTimer);
     if (scanning) scanning.abort = true;
     clearHighlights();
     if (ui) ui.host.remove();
     ui = null;
+    focusTag = null;
   }
 
   function tick() {
-    const on = isCollection() && !!document.body;
-    if (on === active) return;
-    active = on;
-    on ? mount() : unmount();
+    const next = document.body ? routeOf() : null;
+    if (next === route) return;
+    if (route) unmount();
+    route = next;
+    if (route) mount();
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg && msg.type === "panel") {
-      if (active) setOpen(true);
-      reply({ ok: active });
+      if (route) setOpen(true);
+      reply({ ok: !!route });
     }
   });
 
@@ -516,6 +671,12 @@
       font: 600 11.5px/1.3 var(--font-body, "Inter", system-ui, sans-serif); cursor: pointer;
     }
     .chip.on { background: var(--c); color: #0f172a; }
+    .pulls { display: grid; gap: 7px; margin-top: 8px; }
+    .pulls:empty { display: none; }
+    .pull { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+    .pull .t { font-weight: 600; }
+    .rar { padding: 1px 5px; border-radius: 5px; color: #0d1117; font: 700 10.5px/1.3 var(--heading); }
+    .tag { padding: 2px 8px; border-radius: 999px; background: var(--c); color: #0f172a; font: 600 11px/1.3 var(--font-body, "Inter", system-ui, sans-serif); cursor: help; }
     .btn {
       width: 100%; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
       background: var(--surface-2); color: inherit; font: 600 13px/1 var(--heading); cursor: pointer;
@@ -543,8 +704,8 @@
     .note.ok { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
     .note.warn { border-color: rgba(250,153,49,.5); background: rgba(250,153,49,.12); }
     .note.err { border-color: rgba(255,101,104,.55); background: rgba(255,101,104,.12); }
-    .link { display: block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font: 600 12.5px/1.3 var(--heading); cursor: pointer; }
-    footer { display: flex; justify-content: space-between; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+    .link { display: block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font: 600 12.5px/1.3 var(--heading); cursor: pointer; text-align: left; }
+    footer { display: flex; justify-content: space-between; gap: 10px; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
     footer a { color: var(--accent); font: 600 12.5px/1 var(--heading); cursor: pointer; }
     footer a:hover { text-decoration: underline; }
   `;

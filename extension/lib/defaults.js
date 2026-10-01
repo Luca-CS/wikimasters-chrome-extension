@@ -585,7 +585,13 @@
       "pageDelay": 1000,
       "highlight": true,
       "highlightStyle": "ring",
-      "autoPrompt": true
+      "autoPrompt": true,
+      "accountType": "free",
+      "notifyFull": true,
+      "notifyEach": false,
+      "emailFull": false,
+      "ntfyToken": "",
+      "ntfyTopic": ""
     }
   };
   WMT.defaults = { config: () => JSON.parse(JSON.stringify(DEFAULTS)) };

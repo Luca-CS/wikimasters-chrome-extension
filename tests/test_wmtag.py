@@ -170,6 +170,12 @@ class TestExtensionParity(unittest.TestCase):
         n_tagged, n_ok, misses = agreement(cards, rules, wd_text)
         self.assertEqual(out["agreement"], [n_tagged, n_ok, [c.title for c, _, _ in misses]])
 
+    def test_js_unit_tests(self):
+        """Tests Node de l'extension (estimation des paquets, minuteurs…)."""
+        proc = subprocess.run(["node", "--test", "extension/tests/*.test.js"], cwd=ROOT,
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 0, proc.stdout[-3000:] + proc.stderr[-2000:])
+
 
 if __name__ == "__main__":
     unittest.main()

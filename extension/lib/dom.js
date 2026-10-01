@@ -131,5 +131,69 @@
     return out;
   }
 
-  WMT.dom = { clean, pager, cardElements, readCard, cards, activeFilters, hexColor };
+  // --- Page Paquets (/pulls), relevée le 01/10/2026 ---------------------------------
+  // <div class="card-frame ..."><div><span>10</span><span> / 10</span></div><div>paquets disponibles</div></div>
+  // À 10/10 aucun minuteur n'est affiché ; pendant la recharge, on cherche un temps
+  // (« 04:12 », « 4 min 12 s »…) dans la colonne du compteur.
+
+  /** Durée en ms dans un texte (« 04:12 », « 1:02:03 », « dans 4 min 12 s »), sinon null. */
+  function parseDuration(t) {
+    const clock = t.match(/(?:^|[^\d:])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?![\d:])/);
+    if (clock) return ((+(clock[1] || 0) * 60 + +clock[2]) * 60 + +clock[3]) * 1000;
+    if (!/prochain|dans|recharge|reste|nouveau/i.test(t)) return null; // évite les nombres sans rapport
+    const h = t.match(/(\d+)\s*h(?![a-z])/i);
+    const min = t.match(/(\d+)\s*min/i);
+    const s = t.match(/(\d+)\s*s(?:ec(?:onde)?s?)?(?![a-z])/i);
+    if (!h && !min && !s) return null;
+    return (((h ? +h[1] : 0) * 60 + (min ? +min[1] : 0)) * 60 + (s ? +s[1] : 0)) * 1000;
+  }
+
+  /** Compteur de paquets : {count, max, nextMs} (nextMs = null si aucun minuteur affiché). */
+  function packs(doc = document) {
+    const scope = doc.querySelector("main") || doc.body;
+    if (!scope) return null;
+    for (const el of scope.querySelectorAll("div, span, p")) {
+      if (!leaf(el) || !/^paquets? disponibles?$/i.test(text(el))) continue;
+      const box = el.parentElement;
+      const m = box && text(box).match(/(\d+) ?\/ ?(\d+)/);
+      if (!m) continue;
+      const column = (box.parentElement && box.parentElement.parentElement) || scope;
+      let nextMs = null;
+      for (const t of column.querySelectorAll("div, span, p")) {
+        if (!leaf(t) || t === el) continue;
+        const ms = parseDuration(text(t));
+        if (ms != null) {
+          nextMs = ms;
+          break;
+        }
+      }
+      return { count: +m[1], max: +m[2], nextMs };
+    }
+    return null;
+  }
+
+  /**
+   * Écran d'ouverture d'un paquet : « Carte 5 / 5 » au-dessus d'une seule carte en grand (même
+   * composant que la collection, mais avec l'extrait Wikipédia complet en description).
+   * Renvoie {index, total} ou null.
+   */
+  function reveal(doc = document) {
+    const scope = doc.querySelector("main") || doc.body;
+    if (!scope) return null;
+    for (const el of scope.querySelectorAll("span")) {
+      if (!leaf(el) || text(el) !== "Carte") continue;
+      // Trois <span> collés (« Carte » « 5 » « / 5 ») : l'espace vient du CSS, pas du texte.
+      const m = text(el.parentElement).match(/^Carte ?(\d+) ?\/ ?(\d+)$/);
+      if (m) return { index: +m[1], total: +m[2] };
+    }
+    return null;
+  }
+
+  /** Première phrase d'un extrait Wikipédia (celle qui définit le sujet). */
+  function firstSentence(t) {
+    const m = String(t || "").match(/^(.{20,}?[.!?])(?:\s|$)/);
+    return (m ? m[1] : String(t || "")).slice(0, 240);
+  }
+
+  WMT.dom = { clean, pager, cardElements, readCard, cards, activeFilters, hexColor, packs, parseDuration, reveal, firstSentence };
 })(globalThis);

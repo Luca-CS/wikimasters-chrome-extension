@@ -9,7 +9,7 @@ Personal tool that suggests tags ("étiquettes") for cards in a WikiMasters coll
 - **Chrome extension** (`extension/`, the main tool): reads the Collection page DOM, pages through the collection by clicking « Suivant → », categorises the cards, highlights the cards to tag on the page, and shows a report.
 - **Python CLI** (`wmtag/`): parses text the user pastes from the Collection page into `input/*.txt` and writes reports to `output/`.
 
-Hard rule: nothing ever applies tags in the game. Tagging stays manual, and the extension only reads the page and clicks the pagination buttons. The only third-party network access is the optional Wikidata enrichment.
+Hard rule: the extension never acts in the game on the user's behalf. It never applies tags, never opens packs, and never interacts with the site's « je ne suis pas un robot » check. It only reads the page and clicks the collection's pagination buttons. The user explicitly declined pack-opening automation, which is botting. Pack features stay read-only: count reminders and tag suggestions for revealed cards. The only third-party network calls are optional: Wikidata enrichment and ntfy.sh e-mail reminders.
 
 User-facing text, comments, config and output are in French, so keep that language. Python 3.11+ (`tomllib`) and vanilla JS with no build step. There are no dependencies.
 
@@ -41,13 +41,23 @@ On a Windows cp1252 console, `wmtag.main()` reconfigures stdout/stderr with `err
 
 ## Extension (`extension/`, Manifest V3)
 
-Classic scripts attach to a global `WMT` namespace, with no ES modules, so the same files load in content scripts, extension pages and Node: `lib/core.js` (classification), `lib/defaults.js` (generated, so don't edit it), `lib/store.js` (`chrome.storage.local` keys `config`, `scan`, `scanMeta`, `wd`, `done`, `lastRun`), `lib/dom.js` (WikiMasters DOM), `lib/wikidata.js`.
+Classic scripts attach to a global `WMT` namespace, with no ES modules, so the same files load in content scripts, extension pages and Node: `lib/core.js` (classification), `lib/defaults.js` (generated, so don't edit it), `lib/store.js` (`chrome.storage.local` keys `config`, `scan`, `scanMeta`, `wd`, `done`, `lastRun`, `packs`, `packsNotified`), `lib/dom.js` (WikiMasters DOM), `lib/packs.js` (pack estimate), `lib/wikidata.js`.
 
 - **`lib/dom.js`** is the only file that knows the site's markup, captured from a real DOM snapshot on 01/10/2026. A card is found by climbing from its `<h3>` title to the lowest ancestor that contains a rarity-badge leaf (`L|UR|SR|R|PC|C`). The root is that ancestor's parent (`div.relative.isolate.group`). In-game tags are leaf `span`s with `rounded-full` and an inline `background-color`, and their colour is read from the style. Attack and defense are the numeric leaf spans. The pager is the leaf matching `Page X / Y`, and its parent holds the Précédent/Suivant buttons. Pagination is client-side: the URL stays `/collection`.
 - **`content/content.js`** runs on every wiki-masters.com page. It polls `location.pathname` because of Next.js client-side routing, and mounts on `/collection`. It builds a Shadow DOM panel with `adoptedStyleSheets` and `createElement` only, so there is no `innerHTML`, for CSP and Trusted Types safety. It uses the site's CSS variables, so the panel follows the site's dark or light theme.
   - **Scan:** go back to page 1, then forward, waiting each time until both the pager number and the card titles have changed. `settings.pageDelay` sets the pause before each click.
   - **Highlighting:** live classification of the visible cards, memoised, through a `MutationObserver` that ignores the extension's own nodes. Highlights use `data-wmt*` attributes plus an appended `.wmt-flags` node, never `className`, because React re-renders would wipe classes. In-game tag colours are synced into `config.rules[].color` unless `colorLocked`.
-- **`background.js`** opens or focuses `pages/report.html`, because content scripts cannot use `chrome.tabs`.
+- **Packs page (`/pulls`):**
+  - **Counter.** `dom.packs()` reads the counter box `div.card-frame` (« 10 / 10 » plus « paquets disponibles »). A countdown has not been observed yet, so `parseDuration` looks for `mm:ss` or « N min N s » text near the counter.
+  - **Reveal screen.** It shows « Carte X / N » (three adjacent spans, no spaces, read by `dom.reveal()`) above one large card that uses the collection's card component. Its `<p>` holds the full Wikipedia extract, so suggestions use `dom.firstSentence()` only.
+  - **Content script on this page.** It records `packs` = `{count, max, at, nextMs}` in storage only when the estimate changes. It accumulates the revealed cards of the current pack in the panel, and analyses a card only once `checkVisibility()` passes, to avoid spoilers.
+- **`lib/packs.js`** estimates the pack count. The cooldown depends on `settings.accountType`: `free` is 10 min, `pro` is 3 min, and stock caps at the page's max of 10. With no visible timer, the estimate is conservative: a full cooldown before the next pack, so "full" never fires early. It is unit-tested in `extension/tests/packs.test.js` with `node --test`, which runs from `TestExtensionParity`.
+- **`background.js`** imports `lib/defaults.js`, `lib/store.js` and `lib/packs.js` with `importScripts`.
+  - **Pages.** It opens or focuses `pages/report.html`, and `options.html#…`, because content scripts cannot use `chrome.tabs`.
+  - **Alarms.** It reschedules `chrome.alarms` whenever `packs` or `config` changes. `wmt-full` fires when the stock is full and `wmt-next` when the next pack arrives. `wmt-badge` refreshes the icon badge every minute.
+  - **Alerts.** It sends Chrome notifications. The full-stock e-mail is a JSON publish to `https://ntfy.sh/` with `email: "yes"`, which needs the user's ntfy token, because ntfy.sh no longer allows anonymous e-mail. `packsNotified` makes sure there is one alert per refill.
+  - **Testing.** The `testNotify` message backs the Config test buttons.
+- The panel's « Exporter la page » saves `<main>` without scripts or highlights. That is how DOM snapshots like `input/collection.html` are collected.
 - **`pages/`** holds `report` (opened with `?run=1` by the panel: Wikidata enrichment, then `core.analyze`, then three tabs), `options` (rule and theme editors, tester, settings, import/export) and `popup`. MV3 CSP forbids inline scripts, so each page has its own `.js` file. `ui.css` holds the shared WikiMasters theme: dark by default, emerald `#34d399`, Outfit and Inter, rarity colours `--C`…`--L`.
 - The contact e-mail for Wikidata's `Api-User-Agent` lives only in the extension settings and is never written to `defaults.js`.
 
