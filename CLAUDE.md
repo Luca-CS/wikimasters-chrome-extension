@@ -4,39 +4,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Personal script that suggests tags ("étiquettes") for cards in a WikiMasters collection. The user copies the Collection page (Ctrl+A / Ctrl+C) into `input/*.txt`; the script parses it and writes reports to `output/`. It never talks to WikiMasters, and the user applies the tags in the game by hand. The only network access is the optional Wikidata enrichment.
+Personal tool that suggests tags ("étiquettes") for cards in a WikiMasters collection (wiki-masters.com, a card game built from French Wikipedia articles). It exists in two forms that share the same classification logic:
 
-Python 3.11+ (`tomllib`), standard library only. No dependencies and no packaging files. User-facing text, comments, config and output are in French, so keep that language.
+- **Chrome extension** (`extension/`, the main tool): reads the Collection page DOM, pages through the collection by clicking « Suivant → », categorises the cards, highlights the cards to tag on the page, and shows a report.
+- **Python CLI** (`wmtag/`): parses text the user pastes from the Collection page into `input/*.txt` and writes reports to `output/`.
+
+Hard rule: nothing ever applies tags in the game. Tagging stays manual, and the extension only reads the page and clicks the pagination buttons. The only third-party network access is the optional Wikidata enrichment.
+
+User-facing text, comments, config and output are in French, so keep that language. Python 3.11+ (`tomllib`) and vanilla JS with no build step. There are no dependencies.
+
+The code is hosted on GitHub at `Luca-CS/wikimasters-chrome-extension`, a private repo. Work on feature branches and open PRs into `main`. `input/` (the user's pasted pages and the `collection.html` DOM snapshot), `cache/` and `output/` are personal data and gitignored, so never commit them.
 
 ## Commands
 
 ```
-python -m wmtag                    # read input/*.txt and write output/
-python -m wmtag --wikidata         # also query Wikidata (P31 nature, P106 occupation), cached in cache/wikidata.json
-python -m wmtag --no-wikidata      # override wikidata = true from config.toml
-python -m wmtag --no-open          # don't open output/rapport.html in the browser (open_report in config.toml)
-python -m wmtag --min-count 2 --input DIR --output DIR --rules FILE --themes FILE
-python -m unittest -v              # all tests (run from repo root)
+python -m unittest -v              # all tests, including the JS/Python parity test (needs node)
 python -m unittest tests.test_wmtag.TestClassify.test_rules   # single test
+python extension/build_defaults.py # regenerate extension/lib/defaults.js from rules/themes/config.toml
+node --check extension/content/content.js                     # quick syntax check of a JS file
+python -m wmtag                    # CLI: read input/*.txt and write output/
+python -m wmtag --wikidata | --no-wikidata | --no-open | --min-count 2 --input DIR --output DIR
 ```
 
-On a Windows cp1252 console, `main()` reconfigures stdout/stderr with `errors="replace"`, so `→` and accented characters may print as `?`/`�` when output is piped. Set `PYTHONUTF8=1` for readable output. Tests must not depend on `config.toml` network settings, so the end-to-end test passes `--no-wikidata`.
+To try the extension, open `chrome://extensions`, enable developer mode and use "Load unpacked" on `extension/`. After editing, reload it there and reload the WikiMasters tab, because content scripts are not re-injected into open tabs.
 
-VS Code launch configs (`.vscode/launch.json`): `wmtag`, `wmtag + Wikidata`, `tests`.
+On a Windows cp1252 console, `wmtag.main()` reconfigures stdout/stderr with `errors="replace"`. Set `PYTHONUTF8=1` for readable piped output. Tests must not hit the network or depend on `config.toml` network settings: the end-to-end test passes `--no-wikidata --no-open`, and the Wikidata tests mock `_get`.
 
-## Architecture
+## Classification (shared by both forms)
 
-Pipeline in `wmtag/__main__.py`: `read_cards` → `match_card` per card → write 4 outputs (`classement.csv` with `;` separators and utf-8-sig encoding for Excel, `a_etiqueter.md`, `suggestions.md`, and `rapport.html`, which is the main one for the user). Paths default to the repo root (`ROOT`), not the cwd.
+`wmtag/classify.py` and `extension/lib/core.js` are a faithful port of each other. `TestExtensionParity` runs `extension/tests/run_core.js` through node on the same cards and asserts identical matches, hits, themes, recurring words and agreement. Change both sides together.
 
-- **`parser.py`**: a heuristic, line-based parser for the pasted page text. A card is: alt-text line, rarity (`L|UR|SR|R|PC|C`), title, optional description lines, optional blank line followed by tag lines, then **two consecutive number lines** (attack, defense, possibly with thousands separators, including the narrow/nbsp spaces normalised by `_SPACES`). `Page N / M` lines set the page number, and position resets per page. A card is abandoned if no number pair appears within 14 lines or if it reaches the pagination markers. Several pages may be concatenated in one file, and duplicates `(page, position, title)` are dropped in `read_cards`. Any change to the pasted format of the site breaks this file first. `tests/sample_page.txt` is the real-format fixture (50 cards, 16 already tagged).
-- **`classify.py`**: everything is matched on `norm()` text (lowercase, accents stripped, `œ`→`oe`, apostrophes unified). Rule patterns are normalised too, then wrapped in `(?<![\w])…(?![\w])` (whole-word, not `\b`). `keywords` match the description **or** the Wikidata extra text, and `title_keywords` match the title. Score = number of distinct hits, and the stable sort keeps file order on ties.
-- **Two rule files with different roles** (same TOML format, `[tags."Name"]`):
-  - `rules.toml` holds the active tags. These are the **only** tags ever suggested on cards.
-  - `themes.toml` holds candidate themes. They are used only by `suggest_themes` on untagged and unmatched cards to propose new tags once they reach `min_count`, and are never assigned to cards. `suggestions.md` emits a ready-to-paste TOML block (`toml_block`), and the end-to-end test checks that these blocks parse as valid TOML.
-- `agreement()` measures how well the rules reproduce the tags the user already set by hand, counting only tags present in `rules.toml`. The end-to-end test expects `16/16` on the sample, so changing `rules.toml` can break tests.
-- `head_word()` crudely lemmatises the first significant word of the description (feminine→masculine, drops plural `s`) for the "mots récurrents" section.
-- **`report.py`**: builds a self-contained `rapport.html`. Python serialises the data to JSON in a `<script type="application/json">` tag, and inline vanilla JS renders three tabs (to tag / reliability / new themes). Checked cards are kept in `localStorage`, and `#todo`, `#check` or `#themes` in the URL opens that tab. The theme copies wiki-masters.com: dark by default, emerald accent `#34d399`, Outfit and Inter from Google Fonts, rarity colours `--C`…`--L`. Any field added to the JSON must also be handled in the JS, and the end-to-end test parses the embedded JSON.
-- Tag names in `rules.toml` must match the in-game tag names exactly; the user cannot rename tags in the game. `Mythologie` deliberately covers all of Antiquity.
-- **`wikidata.py`**: `wbgetentities` on `frwiki` titles in batches of 50, without `maxlag` (it tracks query-service lag and blocks reads almost permanently), with retry and pause. On failure, `main` carries on without Wikidata, and an identifiable User-Agent from `config.toml`. Titles that are not found are cached as `{"qid": None}` so they are never re-queried. The cache is saved in `finally`. Tests mock `WikidataClient._get`, and tests must not hit the network.
+- Text is compared after `norm()`: lowercase, accents stripped, `œ`→`oe`, apostrophes unified. Rule patterns are normalised too, then wrapped as `(?<![\w])(?:…)(?![\w])` for whole-word matching (in JS, `[\p{L}\p{N}_]` with the `u` flag, falling back to ASCII if `u` rejects the pattern). `keywords` match the description **or** the Wikidata text, and `title_keywords` (`titleKeywords` in JS) match the title. Score = number of distinct hits, and ties keep rule order.
+- There are two rule sets with different roles. **Active rules** (`rules.toml` / config `rules`) are the only tags ever suggested. **Candidate themes** (`themes.toml` / config `themes`) are only counted on untagged, unmatched cards to propose new tags once they reach `min_count`.
+- Cards that already carry a tag get no suggestion. `agreement()` measures how well the rules reproduce the user's manual tags, counting only active tag names. The CLI end-to-end test expects `16/16` on `tests/sample_page.txt`, so editing `rules.toml` can break tests.
+- Tag names must match the in-game names exactly, and the user cannot rename tags in the game. `Mythologie` deliberately covers all of Antiquity.
 
-`config.toml` holds `min_count`, `wikidata` (default for the flag) and `user_agent`. `output/`, `cache/` and `input/*.txt` are gitignored.
+## Extension (`extension/`, Manifest V3)
+
+Classic scripts attach to a global `WMT` namespace, with no ES modules, so the same files load in content scripts, extension pages and Node: `lib/core.js` (classification), `lib/defaults.js` (generated, so don't edit it), `lib/store.js` (`chrome.storage.local` keys `config`, `scan`, `scanMeta`, `wd`, `done`, `lastRun`), `lib/dom.js` (WikiMasters DOM), `lib/wikidata.js`.
+
+- **`lib/dom.js`** is the only file that knows the site's markup, captured from a real DOM snapshot on 01/10/2026. A card is found by climbing from its `<h3>` title to the lowest ancestor that contains a rarity-badge leaf (`L|UR|SR|R|PC|C`). The root is that ancestor's parent (`div.relative.isolate.group`). In-game tags are leaf `span`s with `rounded-full` and an inline `background-color`, and their colour is read from the style. Attack and defense are the numeric leaf spans. The pager is the leaf matching `Page X / Y`, and its parent holds the Précédent/Suivant buttons. Pagination is client-side: the URL stays `/collection`.
+- **`content/content.js`** runs on every wiki-masters.com page. It polls `location.pathname` because of Next.js client-side routing, and mounts on `/collection`. It builds a Shadow DOM panel with `adoptedStyleSheets` and `createElement` only, so there is no `innerHTML`, for CSP and Trusted Types safety. It uses the site's CSS variables, so the panel follows the site's dark or light theme.
+  - **Scan:** go back to page 1, then forward, waiting each time until both the pager number and the card titles have changed. `settings.pageDelay` sets the pause before each click.
+  - **Highlighting:** live classification of the visible cards, memoised, through a `MutationObserver` that ignores the extension's own nodes. Highlights use `data-wmt*` attributes plus an appended `.wmt-flags` node, never `className`, because React re-renders would wipe classes. In-game tag colours are synced into `config.rules[].color` unless `colorLocked`.
+- **`background.js`** opens or focuses `pages/report.html`, because content scripts cannot use `chrome.tabs`.
+- **`pages/`** holds `report` (opened with `?run=1` by the panel: Wikidata enrichment, then `core.analyze`, then three tabs), `options` (rule and theme editors, tester, settings, import/export) and `popup`. MV3 CSP forbids inline scripts, so each page has its own `.js` file. `ui.css` holds the shared WikiMasters theme: dark by default, emerald `#34d399`, Outfit and Inter, rarity colours `--C`…`--L`.
+- The contact e-mail for Wikidata's `Api-User-Agent` lives only in the extension settings and is never written to `defaults.js`.
+
+## Python CLI (`wmtag/`)
+
+The pipeline is `read_cards` → `match_card` → `classement.csv` (`;`, utf-8-sig), `a_etiqueter.md`, `suggestions.md` and `rapport.html` (`report.py`, self-contained HTML with embedded JSON). Paths default to the repo root.
+
+`parser.py` is a line-based parser of the pasted text. A card is: alt line, rarity, title, optional description, optional blank line and tag lines, then two consecutive number lines. `Page N / M` sets the page. Numeric titles such as « 1954 » are valid. `wikidata.py` uses the same API calls as `lib/wikidata.js`, without `maxlag` (it tracks query-service lag and blocks reads almost permanently). The cache format `{titles, labels}` is the same as the extension's `wd` key.
