@@ -1,0 +1,13 @@
+# Seuil : nb de cartes non classées à partir duquel un thème est proposé.
+min_count = 10
+
+# Enrichissement Wikidata (nature de l'article, occupation). Nécessite internet.
+# Peut aussi s'activer ponctuellement avec : python -m wmtag --wikidata
+wikidata = true
+
+# Wikimedia demande un User-Agent identifiable avec un moyen de contact.
+# Remplace l'adresse par la tienne avant d'activer Wikidata.
+user_agent = "WikiMastersTagger/0.1 (script perso; contact: luca.birtas@student-cs.fr)"
+
+# Ouvre automatiquement output/rapport.html dans le navigateur à la fin.
+open_report = true

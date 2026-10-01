@@ -1,0 +1,8 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "wmtag", "type": "debugpy", "request": "launch", "module": "wmtag", "cwd": "${workspaceFolder}", "console": "integratedTerminal" },
+    { "name": "wmtag + Wikidata", "type": "debugpy", "request": "launch", "module": "wmtag", "args": ["--wikidata"], "cwd": "${workspaceFolder}", "console": "integratedTerminal" },
+    { "name": "tests", "type": "debugpy", "request": "launch", "module": "unittest", "args": ["-v"], "cwd": "${workspaceFolder}", "console": "integratedTerminal" }
+  ]
+}

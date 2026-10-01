@@ -1,0 +1,94 @@
+# Tes étiquettes actives. Le script ne suggère QUE ces étiquettes.
+#
+# - keywords       : motifs cherchés dans la description de la carte
+#                    (et dans les infos Wikidata si --wikidata est activé)
+# - title_keywords : motifs cherchés dans le titre de la carte
+#
+# Les motifs sont des regex, comparées sans accents ni majuscules,
+# et doivent correspondre à des mots entiers. "acteur|actrice" marche,
+# "act" ne trouvera pas "acteur" (écrire "act\\w*" pour ça).
+#
+# Pour ajouter une étiquette suggérée par le script, copie le bloc
+# proposé dans output/suggestions.md et colle-le à la fin de ce fichier.
+
+[tags."Cinéma/Séries/Acteurs"]
+keywords = [
+  "acteur", "actrice", "comedien", "comedienne", "cineaste",
+  "realisateur", "realisatrice", "scenariste", "film", "telefilm",
+  "serie televisee", "serie de television", "serie d'animation",
+  "franchise mediatique", "metteur en scene", "producteur de cinema",
+  "societe de production",
+]
+title_keywords = ["\\(film\\)", "\\(serie televisee\\)", "\\(telefilm\\)"]
+
+[tags."Royauté"]
+keywords = [
+  "roi", "reine", "prince", "princesse", "monarque", "monarchie",
+  "dauphin", "empereur", "imperatrice", "dynastie", "souverain", "souveraine",
+  "tsar", "tsarine", "sultan", "pharaon", "duc", "duchesse", "infante?",
+]
+
+[tags."Musique"]
+keywords = [
+  "chanteur", "chanteuse", "musicien", "musicienne", "projet musical",
+  "groupe de (musique|rock|pop|rap|metal|jazz|variete)\\w*", "album", "chanson",
+  "single", "compositeur", "compositrice", "rappeur", "rappeuse",
+  "pianiste", "guitariste", "batteur", "batteuse", "violoniste",
+  "orchestre", "opera", "auteur-compositeur", "dj",
+]
+title_keywords = ["\\(album\\)", "\\(chanson\\)", "\\(groupe\\)"]
+
+[tags."Mythologie"]  # inclut tout ce qui touche à l'Antiquité
+keywords = [
+  # mythologie
+  "mytholog\\w*", "divinite", "dieu", "deesse", "titan", "titanide",
+  "nymphe", "heros grec", "filles? de zeus", "creature legendaire",
+  # antiquité
+  "antiquite", "antique", "grece antique", "rome antique", "egypte antique",
+  "ancienne egypte", "empire romain", "republique romaine", "consul romain",
+  "empereur romain", "cite (grecque|antique)", "hellenisti\\w*", "grec ancien",
+  "athenes", "athenien\\w*", "sparte", "spartiate", "acropole",
+  "(roi|reine|pharaon) d'egypte", "site archeologique",
+  "romaine?s?", "grecque? antique", "pharaon", "pyramide", "hieroglyphe\\w*",
+  "mesopotami\\w*", "babylon\\w*", "sumer\\w*", "assyri\\w*", "hittite\\w*",
+  "perse antique", "achemenide\\w*", "carthag\\w*", "etrusque\\w*", "gaulois\\w*",
+  "macedoine antique", "legion romaine", "legionnaire romain", "gladiateur\\w*",
+  "(philosophe|poete|poetesse|dramaturge|historien|orateur|general|homme politique|sculpteur|mathematicien) (grec|romain|athenien|carthaginois)",
+  "amphitheatre", "theatre antique", "oracle", "troie", "iliade", "odyssee",
+  "heros de la mythologie", "age du (bronze|fer)", "paleochretien\\w*",
+]
+title_keywords = [
+  "^ptolemee", "^cleopatre", "^ramses", "^alexandre le grand", "^jules cesar",
+  "^neron", "^caligula", "^hadrien", "^trajan", "^auguste$", "^nefertiti",
+  "^toutankhamon", "^pericles", "^hannibal", "^vercingetorix", "^marches de trajan",
+]
+
+[tags."Maths"]
+keywords = [
+  "mathemati\\w*", "entier", "nombres?", "theoreme", "geometri\\w*",
+  "algebr\\w*", "equation", "conjecture", "polynome", "integrale",
+]
+
+[tags."Automobile"]
+keywords = [
+  "automobile", "automobiles", "voiture", "voitures", "vehicule", "supercar",
+  "constructeur automobile", "marque automobile", "modele d'automobile",
+  "pilote (automobile|de course|de rallye|de formule \\w+)", "formule 1", "formule un",
+  "rallye", "course automobile", "endurance automobile", "nascar", "karting",
+]
+title_keywords = ["\\(automobile\\)", "^formule 1", "^grand prix (automobile|de formule)"]
+
+[tags."Roumanie"]
+keywords = [
+  "roumain\\w*", "roumanie", "bucarest", "transylvan\\w*", "valachie", "valaque",
+  "dobroudja", "carpates",
+]
+title_keywords = ["roumanie", "bucarest"]
+
+[tags."Ski"]
+keywords = [
+  "ski", "skis", "skieur", "skieuse", "ski alpin", "ski de fond", "saut a ski",
+  "station de ski", "slalom", "slalom geant", "super-g", "biathl\\w*",
+  "combine nordique", "snowboard\\w*",
+]
+title_keywords = ["^ski ", "coupe du monde de ski"]

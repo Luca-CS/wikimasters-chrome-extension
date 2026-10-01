@@ -1,0 +1,88 @@
+# Thématiques candidates. Elles ne sont PAS suggérées sur les cartes :
+# elles servent à détecter les thèmes qui reviennent souvent dans tes
+# cartes non étiquetées. Quand un thème dépasse le seuil (--min-count),
+# il apparaît dans output/suggestions.md avec un bloc prêt à coller
+# dans rules.toml.
+#
+# Même format que rules.toml. Tu peux en ajouter librement.
+
+[tags."Sport"]
+keywords = [
+  "footballeur", "footballeuse", "cycliste", "perchiste", "grimpeur", "grimpeuse",
+  "athlete", "joueur de \\w+", "joueuse de \\w+", "tennisman", "tenniswoman",
+  "boxeur", "boxeuse", "nageur", "nageuse", "rugbyman", "basketteur", "basketteuse",
+  "handballeur", "handballeuse", "pilote (automobile|de course|de moto)",
+  "skieur", "skieuse", "judoka", "entraineur", "entraineuse", "sportif", "sportive",
+  "club de \\w+", "equipe de \\w+", "championnat", "coupe du monde",
+  "jeux olympiques", "stade",
+]
+title_keywords = ["^equipe de", "championnat", "coupe du monde", "jeux olympiques"]
+
+[tags."Politique"]
+keywords = [
+  "homme politique", "femme politique", "personnalite politique", "parti politique",
+  "depute", "deputee", "senateur", "senatrice", "ministre", "president", "presidente",
+  "premier ministre", "maire", "diplomate", "politico\\w*", "election", "syndicat\\w*",
+]
+
+[tags."Littérature"]
+keywords = [
+  "ecrivain", "ecrivaine", "romancier", "romanciere", "poete", "poetesse",
+  "dramaturge", "essayiste", "livre", "roman", "recueil", "nouvelle",
+  "bande dessinee", "manga", "auteur", "autrice",
+]
+
+[tags."Géographie/Lieux"]
+keywords = [
+  "commune", "ville", "village", "capitale", "pays", "region", "departement",
+  "province", "ile", "archipel", "fleuve", "riviere", "lac", "montagne", "massif",
+  "volcan", "desert", "quartier", "arrondissement", "canton", "etat (federe|des etats-unis)",
+]
+
+[tags."Histoire/Militaire"]
+keywords = [
+  "bataille", "guerre", "siege", "traite", "revolution", "armee", "militaire",
+  "general", "marechal", "helicoptere", "avion de (chasse|combat)", "char d'assaut",
+  "navire", "cuirasse", "porte-avions", "espion", "espionne", "resistant", "resistante",
+]
+
+[tags."Sciences"]
+keywords = [
+  "physicien\\w*", "chimiste", "biologiste", "astronome", "astrophysicien\\w*",
+  "ingenieur\\w*", "scientifique", "chercheur", "chercheuse", "medecin",
+  "element chimique", "molecule", "planete", "etoile", "galaxie", "theorie",
+  "aerospatial\\w*", "physique", "chimie", "biologie",
+]
+
+[tags."Philosophie"]
+keywords = ["philosophe", "philosophi\\w*", "courant (philosophique|de pensee)", "doctrine", "ideologie"]
+
+[tags."Nature/Animaux"]
+keywords = [
+  "espece", "genre (de|d') \\w+", "famille de \\w+", "oiseau", "insecte", "mammifere",
+  "poisson", "reptile", "plante", "arbre", "champignon", "animal\\w*", "race de \\w+",
+]
+
+[tags."Tech/Informatique"]
+keywords = [
+  "logiciel", "application", "systeme d'exploitation", "langage de programmation",
+  "site web", "reseau social", "jeu video", "console de jeux?", "informatique",
+  "smartphone", "moteur de recherche",
+]
+title_keywords = ["playstation", "nintendo", "xbox", "microsoft", "google", "apple"]
+
+[tags."Entreprises/Marques"]
+keywords = ["entreprise", "societe", "marque", "constructeur", "multinationale", "groupe industriel", "chaine de \\w+"]
+
+[tags."Religion"]
+keywords = ["pape", "saint", "sainte", "eglise", "religion", "religieux", "religieuse", "eveque", "cathedrale", "abbaye", "monastere", "theolog\\w*"]
+
+[tags."Arts"]
+keywords = ["peintre", "sculpteur", "sculptrice", "tableau", "peinture", "sculpture", "photographe", "architecte", "musee", "dessinateur", "dessinatrice", "illustrat\\w*"]
+
+[tags."Médias/TV"]
+keywords = ["animateur", "animatrice", "journaliste", "emission de television", "chaine de television", "presentateur", "presentatrice", "youtubeur", "youtubeuse", "streameur", "humoriste"]
+
+[tags."Listes Wikipédia"]
+keywords = ["page de liste de wikimedia", "liste"]
+title_keywords = ["^liste d", "^deces en"]
