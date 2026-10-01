@@ -1,5 +1,7 @@
 import json
 import re
+import shutil
+import subprocess
 import tempfile
 import tomllib
 import unittest
@@ -7,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from wmtag import __main__ as cli
-from wmtag.classify import head_word, load_rules, match_card
+from wmtag.classify import agreement, head_word, load_rules, match_card, suggest_themes
 from wmtag.parser import Card, parse_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -128,6 +130,45 @@ class TestWikidataMocked(unittest.TestCase):
             self.assertEqual(out["Lee Pace"], {"P31": ["être humain"], "P106": ["acteur"]})
             self.assertEqual(out["Inconnu"], {"P31": [], "P106": []})
             self.assertIn("Lee Pace", json.loads(cache.read_text(encoding="utf-8"))["titles"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node absent")
+class TestExtensionParity(unittest.TestCase):
+    """Le moteur JS de l'extension (extension/lib/core.js) doit classer exactement comme Python."""
+
+    def test_same_results_as_python(self):
+        cards = parse_text(SAMPLE)
+        rules, themes = load_rules(ROOT / "rules.toml"), load_rules(ROOT / "themes.toml")
+        wd = {"titles": {"Lee Pace": {"qid": "Q1", "P31": ["Q5"], "P106": ["Q33999"]},
+                         "Trullo": {"qid": "Q2", "P31": ["Q3"], "P106": []}},
+              "labels": {"Q5": "être humain", "Q33999": "acteur", "Q3": "maison"}}
+        wd_labels = {c.title: [wd["labels"][q] for p in ("P31", "P106")
+                               for q in wd["titles"].get(c.title, {}).get(p, [])] for c in cards}
+        wd_text = {t: " ; ".join(labs) for t, labs in wd_labels.items()}
+        js_rule = lambda r: {"name": r.name, "keywords": r.raw_keywords, "titleKeywords": r.raw_title_keywords}
+        payload = {
+            "cards": [{"title": c.title, "desc": c.description, "tags": c.tags, "rarity": c.rarity} for c in cards],
+            "rules": [js_rule(r) for r in rules], "themes": [js_rule(t) for t in themes],
+            "minCount": 2, "wd": wd,
+        }
+        proc = subprocess.run(["node", str(ROOT / "extension" / "tests" / "run_core.js")],
+                              input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout)
+
+        for c, got in zip(cards, out["matches"], strict=True):
+            want = [{"tag": m.tag, "hits": m.hits} for m in match_card(c, rules, wd_text[c.title])]
+            self.assertEqual(got, want, c.title)
+        self.assertEqual(out["headWords"], [head_word(c.description) for c in cards])
+
+        unmatched = [c for c in cards if not c.tags and not match_card(c, rules, wd_text[c.title])]
+        rep = suggest_themes(unmatched, themes, {r.name for r in rules}, 2, wd_text, wd_labels)
+        self.assertEqual(out["themes"], [[n, k] for n, k, _, _ in rep.candidate_themes])
+        self.assertEqual(out["words"], [[w, n] for w, n, _ in rep.recurring_words])
+        # Python itère un set pour les libellés Wikidata : l'ordre des ex aequo n'est pas fixé.
+        self.assertEqual(dict(out["wdWords"]), {w: n for w, n, _ in rep.recurring_wikidata})
+        n_tagged, n_ok, misses = agreement(cards, rules, wd_text)
+        self.assertEqual(out["agreement"], [n_tagged, n_ok, [c.title for c, _, _ in misses]])
 
 
 if __name__ == "__main__":
