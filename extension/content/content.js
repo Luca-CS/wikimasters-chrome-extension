@@ -166,12 +166,13 @@
     if (shown && !revealing) {
       pulled = new Map(); // nouvelle ouverture de paquet
       autoStopped = false;
+      if (!dom.blockingDialog()) note(null); // l'ancien message (fin d'enchaînement…) disparaît
     }
     revealing = !!shown;
     for (const c of cards) capturePulled(c, isVisible(c.el));
     renderPulled(shown);
     updatePacks();
-    if (shown && config.settings.autoReveal && !autoRun && !autoStopped) autoReveal();
+    if (shown && config.settings.autoReveal && !autoRun && !autoStopped && !orphaned) autoReveal();
   }
 
   /** Analyse une carte tirée (si visible) et la surligne. */
@@ -322,20 +323,21 @@
     // Le site n'a pas réagi : on ne force rien, c'est à toi de cliquer (l'enchaînement repartira).
     const target = dom.openButton();
     if (target) target.focus();
-    endChain(job, "Le site n'a pas ouvert le paquet suivant : clique sur « Ouvrir » (ou appuie sur Entrée) pour continuer.");
+    endChain(job, "Le site n'a pas ouvert le paquet suivant : clique sur « Ouvrir » (ou appuie sur Entrée) pour continuer.", true);
   }
 
-  function endChain(job, message) {
+  function endChain(job, message, sticky = false) {
     if (chain === job) chain = null;
     if (message) {
       log(message);
-      note(message, message.startsWith("✓") ? "ok" : "warn");
+      note(message, message.startsWith("✓") ? "ok" : "warn", null, sticky ? 0 : 15000);
     }
     renderAuto();
   }
 
   function startChain() {
-    if (!config.settings.autoReveal || !config.settings.autoChain) return;
+    note(null);
+    if (orphaned || !config.settings.autoReveal || !config.settings.autoChain) return;
     const live = dom.packs();
     const total = Math.max(1, live ? live.count : 1);
     chain = { abort: false, left: total - 1, total };
@@ -353,7 +355,7 @@
     }
     if (message) {
       log(message);
-      note(message, "warn");
+      note(message, "warn", null, 8000);
     }
     renderAuto();
   }
@@ -440,13 +442,30 @@
   // --- Paquets : relevé du compteur (les rappels sont programmés par background.js) ----
 
   let packsWriting = false;
+  let packsSeen = null; // dernier relevé vu dans CET onglet
+
+  /** Ce qu'un relevé dit du stock : nombre, max, et heure du plein s'il y a un minuteur. */
+  function readingKey(live, cooldown, now) {
+    const timed = live.nextMs != null;
+    const est = packs.estimate({ count: live.count, max: live.max, at: now, nextMs: live.nextMs }, cooldown, now);
+    return { count: live.count, max: live.max, timed, fullAt: timed ? est.fullAt : null };
+  }
+
+  const sameReading = (a, b) =>
+    !!a && a.count === b.count && a.max === b.max && a.timed === b.timed && (!b.timed || Math.abs(a.fullAt - b.fullAt) <= 5000);
 
   async function updatePacks() {
     const live = dom.packs();
     renderPacks(live);
-    if (!live || packsWriting) return;
+    // Seul l'onglet affiché enregistre, et seulement ce qu'IL voit changer : un autre onglet resté
+    // sur une page Paquets périmée (10/10) ne réécrit plus son ancien relevé à chaque changement
+    // du stockage (le compteur oscillait entre 10 et 5).
+    if (!live || packsWriting || document.visibilityState !== "visible") return;
     const now = Date.now();
     const cooldown = packs.cooldownMs(config.settings);
+    const seen = readingKey(live, cooldown, now);
+    if (sameReading(packsSeen, seen)) return;
+    packsSeen = seen;
     const before = packs.estimate(packsState, cooldown, now);
     let next = null;
     if (live.nextMs != null) {
@@ -590,7 +609,7 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    note("Page exportée dans tes téléchargements (uniquement la zone principale, sans tes identifiants).", "ok");
+    note("Page exportée dans tes téléchargements (uniquement la zone principale, sans tes identifiants).", "ok", null, 8000);
   }
 
   // --- Panneau ---------------------------------------------------------------------
@@ -695,6 +714,7 @@
     const panel = ref("panel", h("div", { class: "panel", hidden: true },
       h("header", {},
         h("b", {}, "Wiki", h("em", {}, "Masters"), " Tagger"),
+        h("small", { class: "ver", title: "Version de l'extension" }, extensionVersion()),
         h("button", { class: "icon", title: "Réduire", onclick: () => setOpen(false) }, "–")),
       sections,
       h("footer", {},
@@ -721,12 +741,17 @@
     sessionStorage.setItem(`wmt-open-${route}`, open ? "1" : "0");
   }
 
-  function note(text, kind = "", action = null) {
+  let noteTimer = 0;
+
+  /** Message du panneau ; ttl (ms) : s'efface tout seul (0 = reste jusqu'au prochain message). */
+  function note(text, kind = "", action = null, ttl = 0) {
     if (!ui || !ui.note) return;
+    clearTimeout(noteTimer);
     ui.note.hidden = !text;
     ui.note.className = `note ${kind}`;
     ui.note.replaceChildren(text || "");
     if (action) ui.note.append(h("button", { class: "link", onclick: action.onclick }, action.label));
+    if (text && ttl) noteTimer = setTimeout(() => note(null), ttl);
   }
 
   function later() {
@@ -833,7 +858,31 @@
     focusTag = null;
   }
 
+  let orphaned = false;
+
+  function extensionAlive() {
+    try {
+      return !!(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  function extensionVersion() {
+    try {
+      return "v" + chrome.runtime.getManifest().version;
+    } catch {
+      return "";
+    }
+  }
+
   function tick() {
+    if (!orphaned && !extensionAlive()) {
+      // L'extension a été rechargée : ce script n'est plus le bon, il arrête tout automatisme.
+      orphaned = true;
+      stopAll();
+      note("L'extension a été mise à jour : recharge la page (F5) pour utiliser la nouvelle version.", "err");
+    }
     const next = document.body ? routeOf() : null;
     if (next === route) return;
     if (route) unmount();
@@ -883,6 +932,7 @@
     }
     header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px 16px; }
     header b { flex: 1; font: 800 16px/1 var(--heading); letter-spacing: -.01em; }
+    .ver { opacity: .45; font: 500 11px/1 var(--heading); }
     header em { font-style: normal; color: var(--accent); }
     .icon { padding: 0 6px; border: 0; background: none; color: inherit; font-size: 20px; line-height: 1; opacity: .6; cursor: pointer; }
     .icon:hover { opacity: 1; }
