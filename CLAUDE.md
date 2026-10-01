@@ -9,7 +9,16 @@ Personal tool that suggests tags ("étiquettes") for cards in a WikiMasters coll
 - **Chrome extension** (`extension/`, the main tool): reads the Collection page DOM, pages through the collection by clicking « Suivant → », categorises the cards, highlights the cards to tag on the page, and shows a report.
 - **Python CLI** (`wmtag/`): parses text the user pastes from the Collection page into `input/*.txt` and writes reports to `output/`.
 
-Hard rule: the extension never acts in the game on the user's behalf. It never applies tags, never opens packs, and never interacts with the site's « je ne suis pas un robot » check. It only reads the page and clicks navigation buttons: the collection's pagination and, on the pack reveal screen once the user has clicked « Ouvrir » themselves, next card and « Continuer ». Pack-opening automation was explicitly declined as botting, so do not add it. The other pack features are read-only: count reminders and tag suggestions for revealed cards. The only third-party network calls are optional: Wikidata enrichment and ntfy.sh e-mail reminders.
+Hard rule: the extension never acts in the game on the user's behalf. It never applies tags, never opens packs, and never interacts with the site's « je ne suis pas un robot » check. It only reads the page and clicks navigation buttons: the collection's pagination and, on the pack reveal screen, next card and « Continuer ».
+
+Packs are opened only inside a chain that the user starts with their own trusted click on « Ouvrir », and only up to the stock available at that moment. Packs that regenerate during the chain are never opened. This is the scope the user agreed to: resources are cooldown-limited, so the chain saves clicks without gaining packs.
+
+Out of scope, so never add any of these:
+- opening packs on a timer or unattended;
+- watching the stock in order to open packs;
+- interacting with the robot check.
+
+The chain pauses on that check until the user validates it, pauses while the tab is hidden, and stops on any trusted input outside the panel. The only third-party network calls are optional: Wikidata enrichment and ntfy.sh e-mail reminders.
 
 User-facing text, comments, config and output are in French, so keep that language. Python 3.11+ (`tomllib`) and vanilla JS with no build step. There are no dependencies.
 
@@ -41,7 +50,7 @@ On a Windows cp1252 console, `wmtag.main()` reconfigures stdout/stderr with `err
 
 ## Extension (`extension/`, Manifest V3)
 
-Classic scripts attach to a global `WMT` namespace, with no ES modules, so the same files load in content scripts, extension pages and Node: `lib/core.js` (classification), `lib/defaults.js` (generated, so don't edit it), `lib/store.js` (`chrome.storage.local` keys `config`, `scan`, `scanMeta`, `wd`, `done`, `lastRun`, `packs`, `packsNotified`), `lib/dom.js` (WikiMasters DOM), `lib/packs.js` (pack estimate), `lib/wikidata.js`.
+Classic scripts attach to a global `WMT` namespace, with no ES modules, so the same files load in content scripts, extension pages and Node: `lib/core.js` (classification), `lib/defaults.js` (generated, so don't edit it), `lib/store.js` (`chrome.storage.local` keys `config`, `scan`, `scanMeta`, `wd`, `done`, `lastRun`, `packs`, `packsNotified`), `lib/dom.js` (WikiMasters DOM), `lib/packs.js` (pack estimate), `lib/rhythm.js` (reveal pacing), `lib/wikidata.js`.
 
 - **`lib/dom.js`** is the only file that knows the site's markup, captured from a real DOM snapshot on 01/10/2026. A card is found by climbing from its `<h3>` title to the lowest ancestor that contains a rarity-badge leaf (`L|UR|SR|R|PC|C`). The root is that ancestor's parent (`div.relative.isolate.group`). In-game tags are leaf `span`s with `rounded-full` and an inline `background-color`, and their colour is read from the style. Attack and defense are the numeric leaf spans. The pager is the leaf matching `Page X / Y`, and its parent holds the Précédent/Suivant buttons. Pagination is client-side: the URL stays `/collection`.
 - **`content/content.js`** runs on every wiki-masters.com page. It polls `location.pathname` because of Next.js client-side routing, and mounts on `/collection`. It builds a Shadow DOM panel with `adoptedStyleSheets` and `createElement` only, so there is no `innerHTML`, for CSP and Trusted Types safety. It uses the site's CSS variables, so the panel follows the site's dark or light theme.
@@ -49,7 +58,12 @@ Classic scripts attach to a global `WMT` namespace, with no ES modules, so the s
   - **Highlighting:** live classification of the visible cards, memoised, through a `MutationObserver` that ignores the extension's own nodes. Highlights use `data-wmt*` attributes plus an appended `.wmt-flags` node, never `className`, because React re-renders would wipe classes. In-game tag colours are synced into `config.rules[].color` unless `colorLocked`.
 - **Packs page (`/pulls`):**
   - **Counter.** `dom.packs()` reads the counter box `div.card-frame`: « 7 / 10 », « paquets disponibles », and below 10 « Prochain dans <span class="font-mono">1:43</span> ». `parseDuration` reads the `m:ss` timer, and also « N min N s » as a fallback.
-  - **Auto-advance.** After the user opens a pack, `autoReveal()` waits `settings.revealDelay` per card (+2.5 s for UR and L), clicks the next arrow, and at « Carte N / N » clicks « Continuer ». `dom.revealNav()` locates the controls: a row `[button, div of dot buttons, button]` and the « Continuer » button. It pauses while `dom.blockingDialog()` detects a dialog or « robot » text, which it never touches, and it stops for the current pack on any trusted `pointerdown` or `keydown`.
+  - **Auto-advance.** `autoReveal()` waits for each card, clicks the next arrow, and at « Carte N / N » clicks « Continuer ».
+    - The wait is `delay(revealDelay, card)`: the base delay times `lib/rhythm.js`'s factor (when `naturalRhythm` is on), plus `readingMs(card)`. The factor is log-normal with mean 1, driven by an AR(1) process on the log scale and clamped to [0.6, 1.8]. `readingMs` adds time for long text, +2.5 s for UR and +3 s for L.
+    - `dom.revealNav()` locates the controls: a row `[button, div of dot buttons, button]` and the « Continuer » button.
+  - **Chain.** If `autoChain` is on, a trusted click on `dom.openButton()` creates `chain = {left, total}`. After « Continuer », `chainNext()` clicks « Ouvrir » again after a rhythm delay.
+  - **Pausing and stopping.** `waitReady()` pauses while `dom.blockingDialog()` detects a dialog or « robot » text, and while `document.hidden`. A trusted `pointerdown` or `keydown` outside the panel, and not during a dialog, stops everything through `stopAll()`.
+  - **Tests.** The chain is verified with real CDP mouse clicks: the scratch harness `chain_driver.mjs` uses `Input.dispatchMouseEvent`, because synthetic clicks are not trusted.
   - **Reveal screen.** It shows « Carte X / N » (three adjacent spans, no spaces, read by `dom.reveal()`) above one large card that uses the collection's card component. Its `<p>` holds the full Wikipedia extract, so suggestions use `dom.firstSentence()` only.
   - **Content script on this page.** It records `packs` = `{count, max, at, nextMs}` in storage only when the estimate changes. It accumulates the revealed cards of the current pack in the panel, and analyses a card only once `checkVisibility()` passes, to avoid spoilers.
 - **`lib/packs.js`** estimates the pack count. The cooldown depends on `settings.accountType`: `free` is 10 min, `pro` is 3 min, and stock caps at the page's max of 10. With no visible timer, the estimate is conservative: a full cooldown before the next pack, so "full" never fires early. It is unit-tested in `extension/tests/packs.test.js` with `node --test`, which runs from `TestExtensionParity`.

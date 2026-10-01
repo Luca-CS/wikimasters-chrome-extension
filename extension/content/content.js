@@ -184,14 +184,17 @@
     if (shown && config.settings.autoReveal && !autoRun && !autoStopped) autoReveal();
   }
 
-  // --- Défilement automatique de l'écran d'ouverture ---------------------------------
-  // Une fois le paquet ouvert (par toi), fait défiler ses cartes puis clique sur « Continuer ».
-  // N'ouvre jamais de paquet. Se met en pause tant qu'une vérification (« je ne suis pas un
-  // robot »…) est affichée, sans jamais y toucher, et s'arrête dès que tu cliques ou tapes.
+  // --- Défilement automatique et enchaînement des ouvertures ---------------------------
+  // Défilement : une fois un paquet ouvert, fait défiler ses cartes puis clique sur « Continuer ».
+  // Enchaînement : démarre UNIQUEMENT sur ton propre clic sur « Ouvrir », puis rouvre tant qu'il
+  // reste des paquets parmi ceux disponibles à ce moment-là (jamais ceux rechargés entre-temps).
+  // Dans les deux cas : pause tant qu'une vérification (« je ne suis pas un robot »…) est affichée,
+  // sans jamais y toucher, pause si l'onglet n'est pas visible, arrêt dès que tu cliques ou tapes.
 
-  let autoRun = null; // {abort}
-  let autoStopped = false; // arrêté pour le paquet en cours
-  const RARE = new Set(["UR", "L"]);
+  let autoRun = null; // {abort} : défilement du paquet en cours
+  let autoStopped = false; // défilement arrêté pour le paquet en cours
+  let chain = null; // {abort, left, total} : enchaînement lancé par ton clic
+  const rhythm = WMT.rhythm.createRhythm();
 
   async function wait(job, ms) {
     const end = Date.now() + ms;
@@ -207,14 +210,23 @@
     return false;
   }
 
-  async function waitDialog(job) {
-    if (!dom.blockingDialog()) return;
-    note("Vérification affichée : à toi de jouer. Le défilement reprend juste après.", "warn");
-    while (!job.abort && dom.blockingDialog()) await sleep(500);
-    if (!job.abort) {
-      note(null);
-      await wait(job, 800);
+  /** Attend que tu aies validé une éventuelle vérification et que l'onglet soit visible. */
+  async function waitReady(job) {
+    if (dom.blockingDialog()) {
+      note("Vérification affichée : à toi de jouer. Ça reprend juste après.", "warn");
+      while (!job.abort && dom.blockingDialog()) await sleep(500);
+      if (!job.abort) {
+        note(null);
+        await wait(job, 800);
+      }
     }
+    while (!job.abort && document.hidden) await sleep(500);
+  }
+
+  /** Délai « naturel » : base × rythme (log-normal corrélé) + temps de lecture de la carte. */
+  function delay(base, card = null) {
+    const factor = config.settings.naturalRhythm ? rhythm.factor() : 1;
+    return Math.round(base * factor + WMT.rhythm.readingMs(card));
   }
 
   async function autoReveal() {
@@ -223,10 +235,10 @@
     try {
       for (let step = 0; step < 40 && !job.abort; step++) {
         if (!dom.reveal()) return; // écran fermé
-        const card = dom.cards(document).find((c) => isVisible(c.el));
-        const dwell = Math.max(600, +config.settings.revealDelay || 1500) + (card && RARE.has(card.rarity) ? 2500 : 0);
-        await wait(job, dwell);
-        await waitDialog(job);
+        const shownCard = dom.cards(document).find((c) => isVisible(c.el));
+        const card = shownCard && { ...shownCard, desc: dom.firstSentence(shownCard.desc) };
+        await wait(job, delay(Math.max(600, +config.settings.revealDelay || 1500), card));
+        await waitReady(job);
         if (job.abort) return;
         clearTimeout(refreshTimer);
         refresh(); // la carte affichée est analysée avant de passer à la suivante
@@ -235,6 +247,7 @@
         const nav = dom.revealNav();
         if (now.index >= now.total) {
           if (nav.cont) nav.cont.click();
+          if (chain && !chain.abort) chainNext(chain);
           return;
         }
         if (!nav.next || nav.next.disabled) return;
@@ -251,26 +264,75 @@
     }
   }
 
-  function stopAuto(message) {
-    if (!autoRun) return;
-    autoRun.abort = true;
-    autoStopped = true;
-    if (message) note(message, "warn");
+  /** Après « Continuer » : rouvre un paquet si l'enchaînement en a encore à ouvrir. */
+  async function chainNext(job) {
+    if (job.left < 1) return endChain(job, `✓ Enchaînement terminé : ${plural(job.total, "paquet")} ouvert${job.total > 1 ? "s" : ""}.`);
+    if (!(await waitFor(job, () => !dom.reveal() && dom.openButton(), 8000))) return endChain(job, null);
+    await wait(job, delay(1200));
+    await waitReady(job);
+    if (job.abort) return;
+    const live = dom.packs();
+    const button = dom.openButton();
+    if (!button || button.disabled || (live && live.count < 1)) return endChain(job, "Plus de paquet disponible : enchaînement terminé.");
+    job.left--;
+    renderAuto();
+    button.click();
+    await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 8000);
+    if (job.abort || dom.reveal()) return; // le défilement prend le relais et rappellera chainNext
+    if (dom.blockingDialog()) {
+      await waitReady(job);
+      if (job.abort || (await waitFor(job, () => dom.reveal(), 8000))) return;
+    }
+    endChain(job, "Le paquet ne s'est pas ouvert : enchaînement arrêté.");
   }
 
-  // Tu prends la main (clic, clavier) : le défilement s'arrête pour ce paquet.
+  function endChain(job, message) {
+    if (chain === job) chain = null;
+    if (message) note(message, "ok");
+    renderAuto();
+  }
+
+  function stopAll(message) {
+    if (chain) chain.abort = true;
+    chain = null;
+    if (autoRun) {
+      autoRun.abort = true;
+      autoStopped = true;
+    }
+    if (message) note(message, "warn");
+    renderAuto();
+  }
+
+  // Ton clic sur « Ouvrir » lance l'enchaînement (si l'option est active).
+  document.addEventListener("click", (e) => {
+    if (!e.isTrusted || route !== "pulls" || !config.settings.autoReveal || !config.settings.autoChain) return;
+    const button = e.target instanceof Element ? e.target.closest("button") : null;
+    if (!button || button !== dom.openButton()) return;
+    const live = dom.packs();
+    const total = Math.max(1, live ? live.count : 1);
+    chain = { abort: false, left: total - 1, total };
+    renderAuto();
+  }, true);
+
+  // Tu prends la main (clic ou touche ailleurs que dans le panneau) : tout s'arrête.
   for (const type of ["pointerdown", "keydown"]) {
     document.addEventListener(type, (e) => {
-      if (e.isTrusted && autoRun) stopAuto("Défilement automatique arrêté : tu as pris la main.");
+      if (!e.isTrusted || (!autoRun && !chain)) return;
+      if (ui && e.composedPath().includes(ui.host)) return; // le panneau a ses propres boutons
+      if (dom.blockingDialog()) return; // tu valides la vérification : on reprendra ensuite
+      stopAll("Automatique arrêté : tu as pris la main.");
     }, true);
   }
 
   function renderAuto() {
     if (!ui || !ui.autoStatus) return;
     const r = dom.reveal();
-    ui.autoStatus.hidden = !autoRun;
-    ui.autoStatus.textContent = autoRun && r ? `Défilement automatique · carte ${r.index} / ${r.total}` : "";
-    ui.autoStop.hidden = !autoRun;
+    const parts = [];
+    if (chain) parts.push(`Enchaînement : paquet ${chain.total - chain.left} / ${chain.total}`);
+    if (autoRun && r) parts.push(`carte ${r.index} / ${r.total}`);
+    ui.autoStatus.hidden = !parts.length;
+    ui.autoStatus.textContent = parts.join(" · ");
+    ui.autoStop.hidden = !(autoRun || chain);
   }
 
   function renderPulled(shown) {
@@ -525,8 +587,11 @@
       onPulls && h("label", { class: "toggle", title: "Après ton clic sur « Ouvrir » : fait défiler les cartes du paquet puis clique sur « Continuer »" },
         h("span", {}, "Défiler les cartes puis « Continuer »"),
         ref("auto", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("autoReveal", e.target.checked) }))),
+      onPulls && h("label", { class: "toggle", title: "Après ton clic sur « Ouvrir » : rouvre les paquets disponibles à ce moment-là, un par un" },
+        h("span", {}, "Enchaîner les paquets disponibles"),
+        ref("chain", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("autoChain", e.target.checked) }))),
       onPulls && ref("autoStatus", h("p", { class: "muted", hidden: true })),
-      onPulls && ref("autoStop", h("button", { class: "link", hidden: true, onclick: () => stopAuto("Défilement automatique arrêté.") }, "Arrêter le défilement")));
+      onPulls && ref("autoStop", h("button", { class: "link", hidden: true, onclick: () => stopAll("Automatique arrêté.") }, "Arrêter")));
 
     const sections = onPulls
       ? [
@@ -622,7 +687,7 @@
   }
 
   async function setSetting(key, value) {
-    if (key === "autoReveal" && !value) stopAuto();
+    if ((key === "autoReveal" || key === "autoChain") && !value) stopAll();
     config = { ...config, settings: { ...config.settings, [key]: value } };
     memo = new Map();
     renderPanel();
@@ -638,6 +703,8 @@
     ui.hl.checked = !!s.highlight;
     if (route === "pulls") {
       ui.auto.checked = !!s.autoReveal;
+      ui.chain.checked = !!s.autoChain;
+      ui.chain.disabled = !s.autoReveal;
       renderPacks();
       renderAuto();
       return;
@@ -698,7 +765,7 @@
     observer = null;
     clearInterval(packsTimer);
     if (scanning) scanning.abort = true;
-    if (autoRun) autoRun.abort = true;
+    stopAll();
     clearHighlights();
     if (ui) ui.host.remove();
     ui = null;

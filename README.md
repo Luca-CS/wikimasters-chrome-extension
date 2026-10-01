@@ -74,11 +74,18 @@ elle se contente de lire ce qui s'affiche.
   suggérées, et la carte à l'écran est surlignée. Une carte n'est analysée
   qu'une fois visible, donc pas de divulgâchage.
 - **Défilement automatique** (désactivable dans le panneau ou la Config). Après
-  ton clic sur « Ouvrir », l'extension fait défiler les cartes du paquet,
-  1,5 s par carte et 2,5 s de plus pour les UR et L, puis clique sur
-  « Continuer ». Si la vérification « je ne suis pas un robot » s'affiche, elle
-  se met en pause sans y toucher et reprend une fois que tu l'as validée. Elle
-  s'arrête dès que tu cliques ou tapes au clavier.
+  ton clic sur « Ouvrir », l'extension fait défiler les cartes du paquet, puis
+  clique sur « Continuer ». Elle compte environ 1,5 s par carte, un peu plus
+  pour les textes longs, 2,5 s de plus pour les UR et 3 s de plus pour les L.
+  Avec le **rythme naturel**, ce temps varie légèrement et dérive doucement
+  d'une carte à l'autre.
+- **Enchaînement des paquets** (désactivable). Ton clic sur « Ouvrir » lance
+  l'enchaînement. L'extension rouvre ensuite un par un les paquets qui étaient
+  disponibles à ce moment-là, jamais ceux qui se rechargent entre-temps.
+- **Dans les deux cas**, si la vérification « je ne suis pas un robot »
+  s'affiche, tout se met en pause sans y toucher et reprend une fois que tu
+  l'as validée. Tout se met aussi en pause si l'onglet n'est plus visible, et
+  s'arrête dès que tu cliques ou tapes ailleurs que dans le panneau.
 
 Si le site change et que quelque chose ne marche plus, le lien **« Exporter la
 page »** du panneau enregistre le HTML de la page, sans tes identifiants. Il

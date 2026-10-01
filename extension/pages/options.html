@@ -73,8 +73,16 @@
           <input type="checkbox" class="switch" data-setting="autoReveal">
         </label>
         <label class="field inline">
-          <span>Temps d'affichage par carte (ms)<br><small>Les cartes UR et L restent 2,5 s de plus.</small></span>
+          <span>Temps d'affichage par carte (ms)<br><small>Plus long pour les textes longs, et pour les UR (+2,5 s) et L (+3 s).</small></span>
           <input type="number" min="600" max="10000" step="100" data-setting="revealDelay">
+        </label>
+        <label class="field inline">
+          <span>Rythme naturel<br><small>Légères variations du temps d'affichage, qui dérivent doucement d'une carte à l'autre.</small></span>
+          <input type="checkbox" class="switch" data-setting="naturalRhythm">
+        </label>
+        <label class="field inline">
+          <span>Enchaîner les paquets disponibles<br><small>Après ton clic sur « Ouvrir », rouvre un par un les paquets disponibles à ce moment-là (pas ceux qui se rechargent pendant). Pause si l'onglet est masqué ou si une vérification s'affiche.</small></span>
+          <input type="checkbox" class="switch" data-setting="autoChain">
         </label>
         <label class="field inline">
           <span>Notification quand les paquets sont pleins</span>

@@ -593,7 +593,9 @@
       "ntfyToken": "",
       "ntfyTopic": "",
       "autoReveal": true,
-      "revealDelay": 1500
+      "revealDelay": 1500,
+      "naturalRhythm": true,
+      "autoChain": true
     }
   };
   WMT.defaults = { config: () => JSON.parse(JSON.stringify(DEFAULTS)) };
