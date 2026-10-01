@@ -13,12 +13,19 @@
   const set = (key, value) => area().set({ [key]: value });
   const remove = (...keys) => area().remove(keys);
 
-  /** Config complète ; initialisée avec defaults.js au premier lancement. */
+  /** Config complète ; initialisée avec defaults.js au premier lancement, puis migrée. */
   async function getConfig() {
     const dflt = WMT.defaults.config();
     let c = await get("config");
     if (!c) {
       c = dflt;
+      await set("config", c);
+    }
+    if ((c.version || 1) < 2) {
+      // v2 : défilement beaucoup plus rapide (0,2 s par carte au lieu de 1,5 s par défaut).
+      const s = { ...c.settings };
+      if (s.revealDelay === undefined || s.revealDelay === 1500) s.revealDelay = dflt.settings.revealDelay;
+      c = { ...c, version: 2, settings: s };
       await set("config", c);
     }
     return { ...c, settings: { ...dflt.settings, ...c.settings } };

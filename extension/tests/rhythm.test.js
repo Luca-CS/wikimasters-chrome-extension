@@ -1,7 +1,7 @@
 // Tests Node du rythme de défilement (node --test extension/tests/).
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createRhythm, readingMs } = require("../lib/rhythm.js");
+const { createRhythm, bonusMs } = require("../lib/rhythm.js");
 
 // Générateur pseudo-aléatoire à graine (mulberry32) : tests reproductibles.
 function seeded(seed) {
@@ -48,11 +48,9 @@ test("délais successifs corrélés (rythme qui dérive, pas un bruit blanc)", (
   assert.ok(Math.abs(nw / dw) < 0.05, "phi = 0 redonne un bruit blanc");
 });
 
-test("temps de lecture selon la carte", () => {
-  assert.equal(readingMs(null), 0);
-  assert.equal(readingMs({ title: "Musc", desc: "matière première", rarity: "C" }), 0);
-  assert.equal(readingMs({ title: "X", desc: "", rarity: "L" }), 3000);
-  assert.equal(readingMs({ title: "X", desc: "", rarity: "UR" }), 2500);
-  const long = readingMs({ title: "Titre", desc: "a".repeat(400), rarity: "R" });
-  assert.equal(long, 1200); // plafonné
+test("bonus pour les cartes au-dessus de SR", () => {
+  assert.equal(bonusMs(null), 0);
+  for (const r of ["C", "PC", "R", "SR"]) assert.equal(bonusMs({ rarity: r }), 0);
+  assert.equal(bonusMs({ rarity: "UR" }), 250);
+  assert.equal(bonusMs({ rarity: "L" }), 250);
 });

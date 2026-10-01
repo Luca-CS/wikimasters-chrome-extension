@@ -75,17 +75,22 @@ elle se contente de lire ce qui s'affiche.
   qu'une fois visible, donc pas de divulgâchage.
 - **Défilement automatique** (désactivable dans le panneau ou la Config). Après
   ton clic sur « Ouvrir », l'extension fait défiler les cartes du paquet, puis
-  clique sur « Continuer ». Elle compte environ 1,5 s par carte, un peu plus
-  pour les textes longs, 2,5 s de plus pour les UR et 3 s de plus pour les L.
-  Avec le **rythme naturel**, ce temps varie légèrement et dérive doucement
-  d'une carte à l'autre.
-- **Enchaînement des paquets** (désactivable). Ton clic sur « Ouvrir » lance
-  l'enchaînement. L'extension rouvre ensuite un par un les paquets qui étaient
-  disponibles à ce moment-là, jamais ceux qui se rechargent entre-temps.
+  clique sur « Continuer ». Elle compte environ 0,2 s par carte, soit un paquet
+  en une seconde environ, et 0,25 s de plus pour les UR et L. Avec le **rythme
+  naturel**, ce temps varie légèrement et dérive doucement d'une carte à
+  l'autre.
+- **Enchaînement des paquets** (désactivable). Ton clic sur « Ouvrir », ou la
+  touche Entrée quand le bouton est sélectionné, lance l'enchaînement.
+  L'extension rouvre ensuite un par un les paquets qui étaient disponibles à ce
+  moment-là, jamais ceux qui se rechargent entre-temps. Si le site refuse un
+  jour les clics automatiques, l'extension ne force rien : elle te demande de
+  cliquer, et l'enchaînement reprend.
 - **Dans les deux cas**, si la vérification « je ne suis pas un robot »
   s'affiche, tout se met en pause sans y toucher et reprend une fois que tu
-  l'as validée. Tout se met aussi en pause si l'onglet n'est plus visible, et
-  s'arrête dès que tu cliques ou tapes ailleurs que dans le panneau.
+  l'as validée. Tout se met aussi en pause si l'onglet n'est plus visible.
+- **Ce qui arrête tout** : un clic souris ou une touche du clavier ailleurs que
+  dans le panneau. Les mouvements du curseur et les touches seules comme Alt
+  (Alt+Tab), Ctrl ou Windows n'arrêtent rien.
 
 Si le site change et que quelque chose ne marche plus, le lien **« Exporter la
 page »** du panneau enregistre le HTML de la page, sans tes identifiants. Il

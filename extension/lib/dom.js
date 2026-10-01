@@ -211,10 +211,12 @@
   }
 
   /** Bouton « Ouvrir » de la page Paquets (image « Ouvrir un paquet » + libellé « Ouvrir »). */
+  const isOpenButton = (b) => !!b && b.tagName === "BUTTON" && (text(b) === "Ouvrir" || !!b.querySelector('img[alt^="Ouvrir"]'));
+
   function openButton(doc = document) {
     const scope = doc.querySelector("main") || doc.body;
     if (!scope) return null;
-    return [...scope.querySelectorAll("button")].find((b) => text(b) === "Ouvrir" || b.querySelector('img[alt^="Ouvrir"]')) || null;
+    return [...scope.querySelectorAll("button")].find(isOpenButton) || null;
   }
 
   const shown = (el) => (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
@@ -241,6 +243,6 @@
 
   WMT.dom = {
     clean, pager, cardElements, readCard, cards, activeFilters, hexColor,
-    packs, parseDuration, reveal, revealNav, openButton, blockingDialog, firstSentence,
+    packs, parseDuration, reveal, revealNav, isOpenButton, openButton, blockingDialog, firstSentence,
   };
 })(globalThis);

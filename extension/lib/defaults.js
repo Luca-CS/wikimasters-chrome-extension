@@ -3,7 +3,7 @@
 (function (root) {
   const WMT = (root.WMT = root.WMT || {});
   const DEFAULTS = {
-    "version": 1,
+    "version": 2,
     "rules": [
       {
         "name": "Cinéma/Séries/Acteurs",
@@ -593,7 +593,7 @@
       "ntfyToken": "",
       "ntfyTopic": "",
       "autoReveal": true,
-      "revealDelay": 1500,
+      "revealDelay": 200,
       "naturalRhythm": true,
       "autoChain": true
     }

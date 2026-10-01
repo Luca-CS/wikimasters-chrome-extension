@@ -34,7 +34,7 @@ def rules(path: Path, offset: int = 0) -> list[dict]:
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     config = {
-        "version": 1,
+        "version": 2,
         "rules": rules(ROOT / "rules.toml"),
         "themes": rules(ROOT / "themes.toml", offset=5),
         "settings": {
@@ -54,7 +54,7 @@ def main():
             "ntfyTopic": "",
             # Écran d'ouverture : défilement des cartes puis « Continuer » (après ton clic sur Ouvrir).
             "autoReveal": True,
-            "revealDelay": 1500,
+            "revealDelay": 200,
             "naturalRhythm": True,  # légères variations corrélées du délai (lib/rhythm.js)
             # Après TON clic sur « Ouvrir », rouvre les paquets disponibles à ce moment-là.
             "autoChain": True,

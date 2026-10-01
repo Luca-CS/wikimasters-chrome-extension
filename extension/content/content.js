@@ -168,44 +168,47 @@
       autoStopped = false;
     }
     revealing = !!shown;
-    for (const c of cards) {
-      if (!isVisible(c.el)) {
-        paint(c, []);
-        continue;
-      }
-      // L'écran d'ouverture affiche l'extrait complet : on ne garde que la phrase de définition.
-      const card = { ...c, desc: dom.firstSentence(c.desc) };
-      const matches = suggestionsFor(card);
-      pulled.set(card.title, { card, matches });
-      paint(c, config.settings.highlight ? matches : []);
-    }
+    for (const c of cards) capturePulled(c, isVisible(c.el));
     renderPulled(shown);
     updatePacks();
     if (shown && config.settings.autoReveal && !autoRun && !autoStopped) autoReveal();
   }
 
+  /** Analyse une carte tirée (si visible) et la surligne. */
+  function capturePulled(c, visible) {
+    if (!visible) return paint(c, []);
+    // L'écran d'ouverture affiche l'extrait complet : on ne garde que la phrase de définition.
+    const card = { ...c, desc: dom.firstSentence(c.desc) };
+    const matches = suggestionsFor(card);
+    pulled.set(card.title, { card, matches });
+    paint(c, config.settings.highlight ? matches : []);
+  }
+
   // --- Défilement automatique et enchaînement des ouvertures ---------------------------
   // Défilement : une fois un paquet ouvert, fait défiler ses cartes puis clique sur « Continuer ».
-  // Enchaînement : démarre UNIQUEMENT sur ton propre clic sur « Ouvrir », puis rouvre tant qu'il
-  // reste des paquets parmi ceux disponibles à ce moment-là (jamais ceux rechargés entre-temps).
-  // Dans les deux cas : pause tant qu'une vérification (« je ne suis pas un robot »…) est affichée,
-  // sans jamais y toucher, pause si l'onglet n'est pas visible, arrêt dès que tu cliques ou tapes.
+  // Enchaînement : démarre UNIQUEMENT sur ton propre appui sur « Ouvrir » (clic ou Entrée), puis
+  // rouvre tant qu'il reste des paquets parmi ceux disponibles à ce moment-là (jamais ceux
+  // rechargés entre-temps). Dans les deux cas : pause tant qu'une vérification (« je ne suis pas
+  // un robot »…) est affichée, sans jamais y toucher, pause si l'onglet n'est pas visible, arrêt
+  // dès que tu cliques ou tapes une touche (les mouvements du curseur ne comptent pas).
 
   let autoRun = null; // {abort} : défilement du paquet en cours
   let autoStopped = false; // défilement arrêté pour le paquet en cours
-  let chain = null; // {abort, left, total} : enchaînement lancé par ton clic
+  let chain = null; // {abort, left, total} : enchaînement lancé par ton appui sur « Ouvrir »
   const rhythm = WMT.rhythm.createRhythm();
+  const CHAIN_PAUSE = 300; // ms avant de rouvrir, comme un humain qui enchaîne
+  const log = (...args) => console.info("[WikiMasters Tagger]", ...args);
 
   async function wait(job, ms) {
     const end = Date.now() + ms;
-    while (!job.abort && Date.now() < end) await sleep(Math.min(100, end - Date.now()));
+    while (!job.abort && Date.now() < end) await sleep(Math.min(50, end - Date.now()));
   }
 
   async function waitFor(job, test, ms) {
     const end = Date.now() + ms;
     while (!job.abort && Date.now() < end) {
       if (test()) return true;
-      await sleep(100);
+      await sleep(50);
     }
     return false;
   }
@@ -213,20 +216,21 @@
   /** Attend que tu aies validé une éventuelle vérification et que l'onglet soit visible. */
   async function waitReady(job) {
     if (dom.blockingDialog()) {
+      log("vérification affichée : pause");
       note("Vérification affichée : à toi de jouer. Ça reprend juste après.", "warn");
-      while (!job.abort && dom.blockingDialog()) await sleep(500);
+      while (!job.abort && dom.blockingDialog()) await sleep(300);
       if (!job.abort) {
         note(null);
-        await wait(job, 800);
+        await wait(job, 500);
       }
     }
-    while (!job.abort && document.hidden) await sleep(500);
+    while (!job.abort && document.hidden) await sleep(300);
   }
 
-  /** Délai « naturel » : base × rythme (log-normal corrélé) + temps de lecture de la carte. */
+  /** Délai « naturel » : base × rythme (log-normal corrélé) + bonus des cartes au-dessus de SR. */
   function delay(base, card = null) {
     const factor = config.settings.naturalRhythm ? rhythm.factor() : 1;
-    return Math.round(base * factor + WMT.rhythm.readingMs(card));
+    return Math.round(base * factor + WMT.rhythm.bonusMs(card));
   }
 
   async function autoReveal() {
@@ -235,22 +239,25 @@
     try {
       for (let step = 0; step < 40 && !job.abort; step++) {
         if (!dom.reveal()) return; // écran fermé
-        const shownCard = dom.cards(document).find((c) => isVisible(c.el));
-        const card = shownCard && { ...shownCard, desc: dom.firstSentence(shownCard.desc) };
-        await wait(job, delay(Math.max(600, +config.settings.revealDelay || 1500), card));
+        const card = dom.cards(document, knownTags())[0];
+        await wait(job, delay(Math.max(100, +config.settings.revealDelay || 200), card));
         await waitReady(job);
         if (job.abort) return;
-        clearTimeout(refreshTimer);
-        refresh(); // la carte affichée est analysée avant de passer à la suivante
+        // La carte affichée est analysée avant de passer à la suivante, même en pleine animation.
+        const shownCard = dom.cards(document, knownTags())[0];
+        if (shownCard) capturePulled(shownCard, true);
+        renderPulled(dom.reveal());
         const now = dom.reveal();
         if (!now) return;
         const nav = dom.revealNav();
         if (now.index >= now.total) {
-          if (nav.cont) nav.cont.click();
+          if (!nav.cont) return log("bouton « Continuer » introuvable");
+          nav.cont.click();
+          log("« Continuer » cliqué", chain ? `(enchaînement : ${chain.left} paquet(s) à ouvrir)` : "");
           if (chain && !chain.abort) chainNext(chain);
           return;
         }
-        if (!nav.next || nav.next.disabled) return;
+        if (!nav.next || nav.next.disabled) return log("bouton « suivant » introuvable ou désactivé");
         nav.next.click();
         await waitFor(job, () => {
           const r = dom.reveal();
@@ -264,31 +271,76 @@
     }
   }
 
+  /** Clic complet (appui, relâchement, clic) pour les boutons qui réagissent à l'appui. */
+  function press(button) {
+    const base = { bubbles: true, cancelable: true, composed: true, button: 0, buttons: 1 };
+    const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
+    button.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    button.dispatchEvent(new MouseEvent("mousedown", base));
+    button.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    button.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0 }));
+    button.click();
+  }
+
   /** Après « Continuer » : rouvre un paquet si l'enchaînement en a encore à ouvrir. */
   async function chainNext(job) {
     if (job.left < 1) return endChain(job, `✓ Enchaînement terminé : ${plural(job.total, "paquet")} ouvert${job.total > 1 ? "s" : ""}.`);
-    if (!(await waitFor(job, () => !dom.reveal() && dom.openButton(), 8000))) return endChain(job, null);
-    await wait(job, delay(1200));
-    await waitReady(job);
+    // Retour sur la page Paquets, avec un bouton « Ouvrir » de nouveau cliquable.
+    const ready = await waitFor(job, () => {
+      const b = dom.openButton();
+      return !dom.reveal() && b && !b.disabled;
+    }, 15000);
     if (job.abort) return;
     const live = dom.packs();
+    if (live && live.count < 1) return endChain(job, "Plus de paquet disponible : enchaînement terminé.");
+    if (!ready) {
+      return endChain(job, dom.openButton()
+        ? "Le bouton « Ouvrir » est resté désactivé : enchaînement arrêté."
+        : "Bouton « Ouvrir » introuvable après « Continuer » : enchaînement arrêté (exporte la page pour que je l'adapte).");
+    }
+    await wait(job, delay(CHAIN_PAUSE));
+    await waitReady(job);
+    if (job.abort) return;
     const button = dom.openButton();
-    if (!button || button.disabled || (live && live.count < 1)) return endChain(job, "Plus de paquet disponible : enchaînement terminé.");
+    if (!button || button.disabled) return endChain(job, "Le bouton « Ouvrir » n'est plus disponible : enchaînement arrêté.");
     job.left--;
     renderAuto();
+    log(`ouverture du paquet ${job.total - job.left} / ${job.total}`);
     button.click();
-    await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 8000);
+    let opened = await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 1500);
+    if (!opened && !job.abort) {
+      log("pas de réaction au clic : essai avec un appui complet");
+      const again = dom.openButton();
+      if (again && !again.disabled) press(again);
+      opened = await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 6000);
+    }
     if (job.abort || dom.reveal()) return; // le défilement prend le relais et rappellera chainNext
     if (dom.blockingDialog()) {
       await waitReady(job);
       if (job.abort || (await waitFor(job, () => dom.reveal(), 8000))) return;
     }
-    endChain(job, "Le paquet ne s'est pas ouvert : enchaînement arrêté.");
+    // Le site n'a pas réagi : on ne force rien, c'est à toi de cliquer (l'enchaînement repartira).
+    const target = dom.openButton();
+    if (target) target.focus();
+    endChain(job, "Le site n'a pas ouvert le paquet suivant : clique sur « Ouvrir » (ou appuie sur Entrée) pour continuer.");
   }
 
   function endChain(job, message) {
     if (chain === job) chain = null;
-    if (message) note(message, "ok");
+    if (message) {
+      log(message);
+      note(message, message.startsWith("✓") ? "ok" : "warn");
+    }
+    renderAuto();
+  }
+
+  function startChain() {
+    if (!config.settings.autoReveal || !config.settings.autoChain) return;
+    const live = dom.packs();
+    const total = Math.max(1, live ? live.count : 1);
+    chain = { abort: false, left: total - 1, total };
+    log(`enchaînement lancé : ${plural(total, "paquet")} disponible${total > 1 ? "s" : ""}`);
+    note(null);
     renderAuto();
   }
 
@@ -299,30 +351,39 @@
       autoRun.abort = true;
       autoStopped = true;
     }
-    if (message) note(message, "warn");
+    if (message) {
+      log(message);
+      note(message, "warn");
+    }
     renderAuto();
   }
 
-  // Ton clic sur « Ouvrir » lance l'enchaînement (si l'option est active).
-  document.addEventListener("click", (e) => {
-    if (!e.isTrusted || route !== "pulls" || !config.settings.autoReveal || !config.settings.autoChain) return;
-    const button = e.target instanceof Element ? e.target.closest("button") : null;
-    if (!button || button !== dom.openButton()) return;
-    const live = dom.packs();
-    const total = Math.max(1, live ? live.count : 1);
-    chain = { abort: false, left: total - 1, total };
-    renderAuto();
+  const onOpenButton = (el) => route === "pulls" && el instanceof Element && dom.isOpenButton(el.closest("button"));
+  const fromPanel = (e) => !!ui && e.composedPath().includes(ui.host);
+  // Touches qui ne sont pas une saisie (Alt+Tab, Ctrl, Windows, volume…) : elles n'arrêtent rien.
+  const SILENT_KEYS = /^(Shift|Control|Alt|AltGraph|Meta|OS|Super|Hyper|Fn|FnLock|CapsLock|NumLock|ScrollLock|Audio.*|Media.*|Launch.*|Browser.*|Unidentified)$/;
+
+  // Appui souris (pas les mouvements) : sur « Ouvrir », (re)lance l'enchaînement ; ailleurs, tu
+  // reprends la main. On écoute l'appui en phase de capture : le site peut ouvrir le paquet dès
+  // l'appui et remplacer l'écran aussitôt, auquel cas le « click » n'arriverait jamais.
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.isTrusted || fromPanel(e)) return;
+    if (onOpenButton(e.target)) {
+      stopAll();
+      return startChain();
+    }
+    if ((autoRun || chain) && !dom.blockingDialog()) stopAll("Automatique arrêté : tu as pris la main.");
   }, true);
 
-  // Tu prends la main (clic ou touche ailleurs que dans le panneau) : tout s'arrête.
-  for (const type of ["pointerdown", "keydown"]) {
-    document.addEventListener(type, (e) => {
-      if (!e.isTrusted || (!autoRun && !chain)) return;
-      if (ui && e.composedPath().includes(ui.host)) return; // le panneau a ses propres boutons
-      if (dom.blockingDialog()) return; // tu valides la vérification : on reprendra ensuite
-      stopAll("Automatique arrêté : tu as pris la main.");
-    }, true);
-  }
+  // Touche du clavier : Entrée / Espace sur « Ouvrir » (re)lance l'enchaînement ; sinon, arrêt.
+  document.addEventListener("keydown", (e) => {
+    if (!e.isTrusted || SILENT_KEYS.test(e.key) || fromPanel(e)) return;
+    if ((e.key === "Enter" || e.key === " ") && onOpenButton(document.activeElement)) {
+      stopAll();
+      return startChain();
+    }
+    if ((autoRun || chain) && !dom.blockingDialog()) stopAll("Automatique arrêté : tu as pris la main.");
+  }, true);
 
   function renderAuto() {
     if (!ui || !ui.autoStatus) return;

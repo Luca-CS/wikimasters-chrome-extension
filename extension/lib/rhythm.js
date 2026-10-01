@@ -1,10 +1,10 @@
 // Rythme de défilement « naturel » pour l'écran d'ouverture des paquets.
 //
-// délai = base × facteur + temps de lecture
+// délai = base × facteur + bonus
 //  - facteur : log-normal de moyenne 1, piloté par un processus AR(1) sur l'échelle log
 //    (z ← φ·z + √(1−φ²)·σ·N(0,1)). Les délais successifs sont corrélés : le rythme dérive
 //    doucement au lieu de sauter au hasard comme un bruit blanc. Borné à [0,6 ; 1,8] × base.
-//  - temps de lecture : un peu plus long pour les textes longs, et pour les cartes UR / L.
+//  - bonus : +0,25 s pour les cartes au-dessus de SR (UR, L).
 // Coût : un tirage gaussien (Box-Muller) par carte.
 (function (root) {
   const WMT = (root.WMT = root.WMT || {});
@@ -26,15 +26,9 @@
     };
   }
 
-  /** Temps de lecture ajouté selon la carte : texte long, rareté. */
-  function readingMs(card) {
-    if (!card) return 0;
-    const chars = (card.title || "").length + Math.min(240, (card.desc || "").length);
-    const reading = Math.min(1200, Math.max(0, chars - 60) * 8);
-    const rare = card.rarity === "L" ? 3000 : card.rarity === "UR" ? 2500 : 0;
-    return reading + rare;
-  }
+  /** Temps en plus pour les cartes au-dessus de SR (UR, L). */
+  const bonusMs = (card) => (card && (card.rarity === "UR" || card.rarity === "L") ? 250 : 0);
 
-  WMT.rhythm = { createRhythm, readingMs, gaussian };
+  WMT.rhythm = { createRhythm, bonusMs, gaussian };
   if (typeof module !== "undefined") module.exports = WMT.rhythm;
 })(globalThis);
