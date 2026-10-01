@@ -32,7 +32,7 @@
       compilePattern(p);
       return null;
     } catch (e) {
-      return e.message;
+      return e.message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, "");
     }
   }
 

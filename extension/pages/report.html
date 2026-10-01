@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rapport · WikiMasters Tagger</title>
+  <link rel="icon" href="../icons/icon32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>Wiki<em>Masters</em> Tagger</h1>
+        <p id="sub" class="muted"></p>
+      </div>
+      <div class="actions">
+        <label class="toggle"><input type="checkbox" class="switch" id="wd"> Wikidata</label>
+        <button class="btn" id="rerun">Recatégoriser</button>
+        <a class="btn" href="options.html">Config</a>
+      </div>
+    </header>
+    <div id="run" class="runbox" hidden>
+      <b id="run-title">Catégorisation…</b>
+      <div class="bar"><i id="run-bar"></i></div>
+      <span id="run-text" class="muted">Les résultats s'affichent dès que c'est fini.</span>
+    </div>
+    <div id="notice" class="note" hidden></div>
+    <div class="stats" id="stats"></div>
+    <nav class="tabs" id="nav"></nav>
+    <main id="main"></main>
+  </div>
+  <script src="../lib/core.js"></script>
+  <script src="../lib/defaults.js"></script>
+  <script src="../lib/store.js"></script>
+  <script src="../lib/wikidata.js"></script>
+  <script src="report.js"></script>
+</body>
+</html>

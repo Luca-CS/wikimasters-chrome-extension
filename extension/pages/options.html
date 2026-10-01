@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Config · WikiMasters Tagger</title>
+  <link rel="icon" href="../icons/icon32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>Wiki<em>Masters</em> Tagger</h1>
+        <p class="muted">Configuration <span id="saved" class="saved"></span></p>
+      </div>
+      <div class="actions"><a class="btn" href="report.html">Rapport</a></div>
+    </header>
+
+    <nav class="anchors">
+      <a href="#tags">Étiquettes</a>
+      <a href="#tester">Tester les règles</a>
+      <a href="#themes">Thèmes candidats</a>
+      <a href="#analyse">Analyse</a>
+      <a href="#data">Données</a>
+    </nav>
+
+    <section class="group" id="tags">
+      <div class="ghead"><h2>Étiquettes actives</h2><button class="btn small" id="add-rule">+ Ajouter</button></div>
+      <p class="d pad">
+        Les seules étiquettes suggérées. Le nom doit être exactement celui du jeu (majuscules et accents compris).
+        Mots-clés : un motif par ligne, ce sont des regex comparées sans accents ni majuscules, sur des mots entiers
+        (« act\w* » trouve « acteur », « act » non). L'ordre départage les égalités.
+      </p>
+      <div class="rules" id="rules"></div>
+    </section>
+
+    <section class="group" id="tester">
+      <div class="ghead"><h2>Tester les règles</h2></div>
+      <div class="tester">
+        <input type="text" id="t-title" placeholder="Titre (ex. Ptolémée II)">
+        <input type="text" id="t-desc" placeholder="Description (ex. roi d'Égypte)">
+      </div>
+      <div class="tester-out" id="t-out"></div>
+    </section>
+
+    <section class="group" id="themes">
+      <div class="ghead"><h2>Thèmes candidats</h2><button class="btn small" id="add-theme">+ Ajouter</button></div>
+      <p class="d pad">
+        Jamais suggérés sur les cartes : ils servent à repérer les thèmes qui reviennent dans tes cartes non classées
+        (onglet « Nouveaux thèmes » du rapport). « Activer » en fait une étiquette.
+      </p>
+      <div class="rules" id="themes-list"></div>
+    </section>
+
+    <section class="group" id="analyse">
+      <div class="ghead"><h2>Analyse</h2></div>
+      <div class="form">
+        <label class="field inline">
+          <span>Proposer l'analyse en arrivant sur la collection<br><small>Si la dernière analyse date de plus de 24 h.</small></span>
+          <input type="checkbox" class="switch" data-setting="autoPrompt">
+        </label>
+        <label class="field inline">
+          <span>Pause entre deux pages (ms)<br><small>Laisse le site respirer pendant l'analyse : 1000 ms = 1 s par page.</small></span>
+          <input type="number" min="300" max="10000" step="100" data-setting="pageDelay">
+        </label>
+        <label class="field inline">
+          <span>Surligner les cartes à étiqueter</span>
+          <input type="checkbox" class="switch" data-setting="highlight">
+        </label>
+        <label class="field inline">
+          <span>Style du surlignage</span>
+          <select data-setting="highlightStyle">
+            <option value="ring">Contour coloré + étiquette</option>
+            <option value="flag">Étiquette seule</option>
+          </select>
+        </label>
+        <label class="field inline">
+          <span>Seuil des thèmes récurrents<br><small>Nombre de cartes non classées à partir duquel un thème est proposé.</small></span>
+          <input type="number" min="1" max="500" data-setting="minCount">
+        </label>
+        <label class="field inline">
+          <span>Enrichir avec Wikidata<br><small>Ajoute la nature (« film », « être humain »…) et l'occupation (« acteur »…) de chaque carte.</small></span>
+          <input type="checkbox" class="switch" data-setting="wikidata">
+        </label>
+        <label class="field">
+          <span>Ton e-mail, comme contact pour Wikimedia</span>
+          <input type="email" placeholder="toi@example.com" data-setting="contact">
+          <small>Envoyé uniquement à Wikidata, dans l'en-tête Api-User-Agent, comme le demande Wikimedia.</small>
+        </label>
+      </div>
+    </section>
+
+    <section class="group" id="data">
+      <div class="ghead"><h2>Données</h2><span class="count" id="usage"></span></div>
+      <p class="d pad" id="data-info"></p>
+      <div class="row-btns">
+        <button class="btn" id="export">Exporter la config</button>
+        <label class="btn">Importer une config<input type="file" id="import" accept="application/json,.json" hidden></label>
+        <button class="btn danger" id="clear-wd">Vider le cache Wikidata</button>
+        <button class="btn danger" id="clear-scan">Supprimer l'analyse</button>
+        <button class="btn danger" id="reset">Réinitialiser la config</button>
+      </div>
+    </section>
+  </div>
+  <script src="../lib/core.js"></script>
+  <script src="../lib/defaults.js"></script>
+  <script src="../lib/store.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
