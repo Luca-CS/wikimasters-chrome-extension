@@ -1,94 +1,149 @@
 # Tes étiquettes actives. Le script ne suggère QUE ces étiquettes.
 #
-# - keywords       : motifs cherchés dans la description de la carte
-#                    (et dans les infos Wikidata si --wikidata est activé)
-# - title_keywords : motifs cherchés dans le titre de la carte
+# - keywords       : motifs cherchés dans la description de la carte, dans la précision
+#                    entre parenthèses à la fin du titre (« Couplage (théorie des graphes) »)
+#                    et dans les infos Wikidata si --wikidata est activé
+# - title_keywords : motifs cherchés dans le titre complet de la carte
+# - shiny = true   : étiquette posée sur toutes les cartes shiny (✦), en plus de leur catégorie
 #
 # Les motifs sont des regex, comparées sans accents ni majuscules,
 # et doivent correspondre à des mots entiers. "acteur|actrice" marche,
 # "act" ne trouvera pas "acteur" (écrire "act\\w*" pour ça).
+#
+# Wikidata ne fait que compléter : dès qu'une étiquette trouve un indice dans la carte
+# elle-même, celles qui ne viennent que de Wikidata sont écartées. Si la carte a une
+# description qui ne matche rien, seule la nature Wikidata (« film », « album »…) compte,
+# pas les occupations, trop bruitées.
 #
 # Pour ajouter une étiquette suggérée par le script, copie le bloc
 # proposé dans output/suggestions.md et colle-le à la fin de ce fichier.
 
 [tags."Cinéma/Séries/Acteurs"]
 keywords = [
-  "acteur", "actrice", "comedien", "comedienne", "cineaste",
-  "realisateur", "realisatrice", "scenariste", "film", "telefilm",
-  "serie televisee", "serie de television", "serie d'animation",
-  "franchise mediatique", "metteur en scene", "producteur de cinema",
-  "societe de production",
+  "acteur", "actrice", "comedien", "comedienne", "cineaste", "realisateur", "realisatrice",
+  # pas les scénaristes de bande dessinée ni de jeux
+  "scenariste(?! de (bande dessinee|bd|jeux?))",
+  "films?", "telefilm", "court[ -]metrage", "long[ -]metrage", "cinema\\w*",
+  "serie televisee", "serie de television", "serie d'animation", "mini-?series?",
+  "saison de serie", "sitcom", "telenovela", "feuilleton televise", "documentaire",
+  "franchise mediatique", "metteur en scene", "metteuse en scene",
+  "product(eur|rice) de (cinema|films?)", "societe de production",
+  "direct(eur|rice) de la photographie", "doubleur", "doubleuse",
 ]
-title_keywords = ["\\(film\\)", "\\(serie televisee\\)", "\\(telefilm\\)"]
 
 [tags."Royauté"]
 keywords = [
-  "roi", "reine", "prince", "princesse", "monarque", "monarchie",
-  "dauphin", "empereur", "imperatrice", "dynastie", "souverain", "souveraine",
-  "tsar", "tsarine", "sultan", "pharaon", "duc", "duchesse", "infante?",
+  "rois?", "reines?", "prince", "princesse", "monarque", "dauphine? de france",
+  "empereur", "imperatrice", "dynastie", "souverain", "souveraine",
+  "tsar", "tsarine", "sultan", "sultane", "pharaon", "infante?", "emir", "shah", "maharaja\\w*",
+  "archiduc", "archiduchesse", "grand-duc", "grande-duchesse",
+  "famille (royale|imperiale)", "maison (royale|imperiale)", "(reine|roi|prince) consort",
+]
+title_keywords = [
+  "^liste des (rois|reines|souverains|monarques|empereurs|imperatrices|pharaons|sultans|tsars|princes|emirs)\\b",
 ]
 
 [tags."Musique"]
 keywords = [
-  "chanteur", "chanteuse", "musicien", "musicienne", "projet musical",
-  "groupe de (musique|rock|pop|rap|metal|jazz|variete)\\w*", "album", "chanson",
-  "single", "compositeur", "compositrice", "rappeur", "rappeuse",
-  "pianiste", "guitariste", "batteur", "batteuse", "violoniste",
-  "orchestre", "opera", "auteur-compositeur", "dj",
+  "chanteur", "chanteuse", "musicien", "musicienne", "musique", "musicale?s?", "musicaux",
+  "projet musical", "groupe (musical|vocal)", "boys? band", "girls? band", "girl group",
+  "groupe de (musique|rock|pop|rap|hip-hop|metal|jazz|variete|punk|reggae|funk|soul|blues|folk|electro|techno|country|ska)\\w*",
+  "hip-hop", "rap", "rock", "jazz", "reggae", "heavy metal", "death metal", "black metal",
+  "album", "chanson", "single", "symphonie", "sonate", "concerto", "opera",
+  "compositeur", "compositrice", "auteur-compositeur\\w*", "autrice-compositrice\\w*",
+  "rappeur", "rappeuse", "dj", "disc[ -]jockey", "pianiste", "guitariste", "bassiste",
+  "batteur", "batteuse", "percussionniste", "violoniste", "violoncelliste", "contrebassiste",
+  "saxophoniste", "trompettiste", "flutiste", "clarinettiste", "organiste", "claveciniste",
+  "harpiste", "accordeoniste", "balafoniste", "sitar\\w*", "luthier", "orchestre", "chef d'orchestre",
+  "soprano", "mezzo-soprano", "tenor", "baryton", "contralto", "cantatrice",
+  "instrument de musique", "instrument a (cordes|vent|percussion|clavier)",
+  "technique vocale", "registre (vocal|de voix)", "maison de disques", "label discographique",
 ]
-title_keywords = ["\\(album\\)", "\\(chanson\\)", "\\(groupe\\)"]
+title_keywords = ["\\((groupe|ep)\\)", "^(sonate|symphonie|concerto|requiem|cantate|quatuor a cordes)\\b"]
 
 [tags."Mythologie"]  # inclut tout ce qui touche à l'Antiquité
 keywords = [
   # mythologie
-  "mytholog\\w*", "divinite", "dieu", "deesse", "titan", "titanide",
-  "nymphe", "heros grec", "filles? de zeus", "creature legendaire",
+  "mytholog\\w*", "mythique", "divinite\\w*", "dieux", "deesses?", "demi-dieu",
+  "dieu (de|du|des|d'|grec|romain|egyptien|nordique|celte|hindou|azteque|maya|inca)\\w*",
+  "titan", "titanide", "nymphe\\w*", "heros (grec|de la mythologie|legendaire|mythologique)",
+  "filles? de zeus", "fils de zeus", "personnage legendaire",
+  "creature (legendaire|mythologique|fantastique|imaginaire|mythique)",
+  "(figure|creature|animal|monstre) (heraldique )?imaginaire", "monstre (legendaire|mythologique)",
+  "cyclope", "centaure", "minotaure", "gorgone",
   # antiquité
   "antiquite", "antique", "grece antique", "rome antique", "egypte antique",
-  "ancienne egypte", "empire romain", "republique romaine", "consul romain",
+  "ancienne egypte", "(?<!saint-)empire romain(?! germanique)", "republique romaine", "consul romain",
   "empereur romain", "cite (grecque|antique)", "hellenisti\\w*", "grec ancien",
-  "athenes", "athenien\\w*", "sparte", "spartiate", "acropole",
-  "(roi|reine|pharaon) d'egypte", "site archeologique",
-  "romaine?s?", "grecque? antique", "pharaon", "pyramide", "hieroglyphe\\w*",
+  "athenes", "athenien\\w*", "sparte", "spartiate", "acropole", "temple (grec|romain)",
+  "(roi|reine|pharaon) d'egypte",
+  "(?<!catholique )(?<!saint-empire )romaine?s?(?! germanique)", "grecque? antique",
+  "pharaon", "pyramide", "hieroglyphe\\w*",
   "mesopotami\\w*", "babylon\\w*", "sumer\\w*", "assyri\\w*", "hittite\\w*",
-  "perse antique", "achemenide\\w*", "carthag\\w*", "etrusque\\w*", "gaulois\\w*",
+  "perse antique", "achemenide\\w*", "carthag\\w*", "etrusque\\w*", "gaulois\\w*", "thrace\\w*",
   "macedoine antique", "legion romaine", "legionnaire romain", "gladiateur\\w*",
   "(philosophe|poete|poetesse|dramaturge|historien|orateur|general|homme politique|sculpteur|mathematicien) (grec|romain|athenien|carthaginois)",
   "amphitheatre", "theatre antique", "oracle", "troie", "iliade", "odyssee",
   "heros de la mythologie", "age du (bronze|fer)", "paleochretien\\w*",
 ]
 title_keywords = [
-  "^ptolemee", "^cleopatre", "^ramses", "^alexandre le grand", "^jules cesar",
-  "^neron", "^caligula", "^hadrien", "^trajan", "^auguste$", "^nefertiti",
-  "^toutankhamon", "^pericles", "^hannibal", "^vercingetorix", "^marches de trajan",
+  "ptolemee", "cleopatre", "ramses", "alexandre le grand", "jules cesar",
+  "neron", "caligula", "hadrien", "trajan", "^auguste$", "nefertiti",
+  "toutankhamon", "pericles", "hannibal", "vercingetorix",
 ]
 
 [tags."Maths"]
 keywords = [
-  "mathemati\\w*", "entier", "nombres?", "theoreme", "geometri\\w*",
-  "algebr\\w*", "equation", "conjecture", "polynome", "integrale",
+  "mathemati\\w*", "entiers? (naturels?|relatifs?|positifs?|strictement positifs?)", "nombre entier",
+  "nombres? (premiers?|reels?|complexes?|rationnels?|irrationnels?|transcendants?|parfaits?|algebriques?|pairs?|impairs?|entiers?)",
+  "theoreme", "lemme", "conjecture", "axiome\\w*", "corollaire", "geometri\\w*", "algebr\\w*",
+  "equations?", "inequation\\w*", "polynom\\w*", "integrale\\w*", "derivee", "topologi\\w*",
+  "probabilit\\w*", "test statistique", "statistique (mathematique|inferentielle|descriptive)",
+  "theorie des (graphes|nombres|ensembles|categories|groupes|jeux)", "graphes?",
+  "polyedre\\w*", "polygone\\w*", "fractal\\w*", "arithmeti\\w*", "trigonometri\\w*",
+  "booleen\\w*", "booleenne\\w*", "logique (mathematique|formelle)", "demonstration (mathematique|formelle)",
+]
+title_keywords = [
+  "^(theoreme|lemme|conjecture|axiome|corollaire|equation|inegalite)\\b",
+  "\\((nombre|analyse|logique|analyse complexe)\\)", "booleen\\w*", "valeurs? (propres?|singulieres?)",
 ]
 
 [tags."Automobile"]
 keywords = [
-  "automobile", "automobiles", "voiture", "voitures", "vehicule", "supercar",
+  "automobiles?", "voitures?", "vehicules? (automobiles?|utilitaires?|de tourisme|electriques?|hybrides?|de sport)",
+  "supercar", "hypercar", "concept car", "roadster", "berline", "cabriolet",
   "constructeur automobile", "marque automobile", "modele d'automobile",
-  "pilote (automobile|de course|de rallye|de formule \\w+)", "formule 1", "formule un",
-  "rallye", "course automobile", "endurance automobile", "nascar", "karting",
+  "pilote (automobile|de course|de rallye|de formule \\w+|d'endurance|de nascar)",
+  "formule (1|un|2|3|e)", "grand prix (automobile|de formule \\w+)",
+  "rallye\\w*", "courses? (automobiles?|de cotes?)", "endurance automobile", "24 heures du mans",
+  "nascar", "indycar", "karting", "sport automobile", "circuit automobile",
+  "jeu video de course", "simulation automobile",
 ]
-title_keywords = ["\\(automobile\\)", "^formule 1", "^grand prix (automobile|de formule)"]
+title_keywords = [
+  "^f1 \\d{4}", "^formule 1", "^grand prix (automobile|de formule)",
+  "^(gran turismo|need for speed|forza (motorsport|horizon))\\b",
+  # modèle d'une marque : « Ferrari 365 », « Toyota Aygo »… (le nom seul ne suffit pas)
+  "^(peugeot|renault|citroen|ferrari|porsche|lamborghini|bugatti|aston martin|bmw|audi|volkswagen|fiat|alfa romeo|lancia|maserati|bentley|rolls-royce|chevrolet|dodge|chrysler|cadillac|de dion-bouton|panhard|simca|delahaye|hispano-suiza|mclaren|skoda|volvo|mazda|subaru|nissan|toyota|dacia|lada|mercedes-benz|jaguar|ford|opel|tesla) [a-z0-9]",
+]
 
 [tags."Roumanie"]
 keywords = [
-  "roumain\\w*", "roumanie", "bucarest", "transylvan\\w*", "valachie", "valaque",
-  "dobroudja", "carpates",
+  "roumain\\w*", "roumanie", "bucarest", "transylvan\\w*", "valachie", "valaque\\w*",
+  "moldav\\w*", "dacie", "dobroudja", "carpates", "banat", "bucovine",
+  "cluj\\w*", "timisoara", "iasi", "brasov", "sibiu", "constanta", "craiova", "oradea",
+  "palinka", "tuica", "mamaliga", "sarmale",
 ]
-title_keywords = ["roumanie", "bucarest"]
+title_keywords = ["roumanie", "bucarest", "palinka", "tuica", "^dacia\\b"]
 
 [tags."Ski"]
 keywords = [
-  "ski", "skis", "skieur", "skieuse", "ski alpin", "ski de fond", "saut a ski",
-  "station de ski", "slalom", "slalom geant", "super-g", "biathl\\w*",
-  "combine nordique", "snowboard\\w*",
+  "skis?", "skieur", "skieuse", "skieurs", "skieuses",
+  "ski (alpin|de fond|acrobatique|nordique|de randonnee|freestyle)", "saut a ski",
+  "sauteur a ski", "sauteuse a ski", "station de (ski|sports d'hiver)", "domaine skiable",
+  "slalom\\w*", "super-g", "biathl\\w*", "combine nordique", "snowboard\\w*",
+  "fondeur", "fondeuse", "telemark",
 ]
-title_keywords = ["^ski ", "coupe du monde de ski"]
+title_keywords = ["^ski ", "coupe du monde de ski", "championnats? du monde de ski"]
+
+[tags."Shiny"]  # toutes les cartes shiny (✦), en plus de leur catégorie
+shiny = true

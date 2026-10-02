@@ -3,7 +3,7 @@
 Structure observée d'une carte (une info par ligne) :
 
     <texte alt de l'image, ou "WikiMasters" si pas d'image>
-    <rareté : L | UR | SR | R | PC | C>
+    <rareté : L | UR | SR | R | PC | C>  (carte shiny : « L✦ shiny », ou ✦ et « shiny » à la ligne)
     <titre>
     [description]          (optionnelle)
     [ligne vide]           (optionnelle)
@@ -22,6 +22,8 @@ RARITIES = ("L", "UR", "SR", "R", "PC", "C")
 RARITY_SET = set(RARITIES)
 
 _NUM_RE = re.compile(r"^\d{1,3}(?: \d{3})*$|^\d+$")
+_RARITY_RE = re.compile(r"^(L|UR|SR|R|PC|C)\s*(✦)?\s*(shiny)?$")
+_SHINY_LINES = {"✦", "shiny"}
 _PAGE_RE = re.compile(r"^Page\s+(\d+)\s*/\s*(\d+)$")
 _SPACES = str.maketrans({" ": " ", " ": " ", " ": " "})
 
@@ -37,6 +39,7 @@ class Card:
     page: int | None = None
     position: int = 0  # rang sur la page (1 = en haut à gauche)
     source: str = ""
+    shiny: bool = False  # badge « ✦ shiny » à côté de la rareté
 
 
 def _clean(line: str) -> str:
@@ -56,15 +59,25 @@ def _try_card(lines: list[str], i: int) -> tuple[Card, int] | None:
     Renvoie (carte, index de la ligne suivante) ou None."""
     if i + 2 >= len(lines):
         return None
-    alt, rarity, title = lines[i], lines[i + 1], lines[i + 2]
-    if not alt or rarity not in RARITY_SET or not title or title in RARITY_SET:
+    alt = lines[i]
+    m = _RARITY_RE.match(lines[i + 1])
+    if not alt or not m:
+        return None
+    rarity, shiny = m.group(1), bool(m.group(2) or m.group(3))
+    k = i + 2
+    while k < len(lines) and lines[k] in _SHINY_LINES:
+        shiny, k = True, k + 1
+    if k >= len(lines):
+        return None
+    title = lines[k]
+    if not title or title in RARITY_SET:
         return None
     # Un titre peut être purement numérique (ex. « 1954 ») : on ne le rejette pas.
 
     desc_lines: list[str] = []
     tag_lines: list[str] = []
     seen_blank = False
-    j = i + 3
+    j = k + 1
     # Une carte fait au plus ~10 lignes ; au-delà on considère que ce n'est pas une carte.
     while j < len(lines) and j < i + 14:
         cur = lines[j]
@@ -76,6 +89,7 @@ def _try_card(lines: list[str], i: int) -> tuple[Card, int] | None:
                 tags=tag_lines,
                 attack=_to_int(cur),
                 defense=_to_int(lines[j + 1]),
+                shiny=shiny,
             )
             return card, j + 2
         if cur in ("← Précédent", "Suivant →") or _PAGE_RE.match(cur):

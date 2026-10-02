@@ -40,43 +40,103 @@
     return (list || []).map((r) => ({
       name: r.name,
       color: r.color,
+      shiny: !!r.shiny,
       raw: r,
       kw: (r.keywords || []).flatMap((p) => (patternError(p) ? [] : [compilePattern(p)])),
       tkw: (r.titleKeywords || []).flatMap((p) => (patternError(p) ? [] : [compilePattern(p)])),
     }));
   }
 
-  /** Étiquettes qui matchent, triées par score décroissant puis ordre des règles. */
-  function matchCard(card, rules, extraText = "") {
+  /** Précision entre parenthèses en fin de titre : « Couplage (théorie des graphes) ». */
+  function qualifier(title) {
+    const m = String(title || "").match(/\(([^()]*)\)\s*$/);
+    return m ? m[1] : "";
+  }
+
+  /**
+   * Étiquettes qui matchent, triées par score décroissant puis ordre des règles.
+   * Indices propres à la carte : description, précision du titre, motifs de titre. Wikidata
+   * (extraText = nature + occupations) ne fait que compléter : si une règle a un indice propre,
+   * celles qui n'ont que Wikidata sont écartées. Sans indice propre, on se rabat sur Wikidata ;
+   * si la carte a une description, seulement sur sa nature (natureText, P31), les occupations
+   * étant trop bruitées. Les règles shiny matchent les cartes shiny.
+   */
+  function matchCard(card, rules, extraText = "", natureText = null) {
     const desc = norm(card.desc);
-    const extra = norm(extraText);
+    const qual = norm(qualifier(card.title));
     const title = norm(card.title);
-    const out = [];
+    const extra = norm(extraText);
+    const nature = natureText == null || !desc ? extra : norm(natureText);
+    const ownFound = [];
+    const wdFound = [];
+    const shiny = [];
     for (const rule of rules) {
-      const hits = new Set();
+      if (rule.shiny) {
+        if (card.shiny) shiny.push({ tag: rule.name, score: 1, hits: ["shiny"] });
+        continue;
+      }
+      const own = new Set();
+      const wd = new Set();
+      const fallback = new Set();
       for (const re of rule.kw) {
-        const m = re.exec(desc) || (extra ? re.exec(extra) : null);
-        if (m) hits.add(m[0]);
+        let m = re.exec(desc) || (qual ? re.exec(qual) : null);
+        if (m) {
+          own.add(m[0]);
+          continue;
+        }
+        m = extra ? re.exec(extra) : null;
+        if (m) {
+          wd.add(m[0]);
+          m = nature ? re.exec(nature) : null;
+          if (m) fallback.add(m[0]);
+        }
       }
       for (const re of rule.tkw) {
         const m = re.exec(title);
-        if (m) hits.add("titre:" + m[0]);
+        if (m) own.add("titre:" + m[0]);
       }
-      if (hits.size) out.push({ tag: rule.name, score: hits.size, hits: [...hits].sort() });
+      if (own.size) {
+        const hits = [...new Set([...own, ...wd])].sort();
+        ownFound.push({ tag: rule.name, score: hits.length, hits });
+      } else if (fallback.size) {
+        wdFound.push({ tag: rule.name, score: fallback.size, hits: [...fallback].sort() });
+      }
     }
+    const out = ownFound.length ? ownFound : wdFound;
     out.sort((a, b) => b.score - a.score); // tri stable => ordre des règles en cas d'égalité
-    return out;
+    return out.concat(shiny);
+  }
+
+  const shinyNames = (rules) => new Set(rules.filter((r) => r.shiny || (r.raw && r.raw.shiny)).map((r) => r.name));
+
+  /** Étiquettes posées qui classent la carte (toutes sauf les étiquettes shiny). */
+  function categoryTags(card, rules) {
+    const special = shinyNames(rules);
+    return card.tags.filter((t) => !special.has(t));
+  }
+
+  /**
+   * Étiquettes à poser : la catégorie si la carte n'en a pas encore, et l'étiquette shiny sur
+   * une carte shiny qui ne l'a pas, même déjà classée.
+   */
+  function suggest(card, rules, extraText = "", natureText = null) {
+    const special = shinyNames(rules);
+    const classified = card.tags.some((t) => !special.has(t));
+    return matchCard(card, rules, extraText, natureText)
+      .filter((m) => !card.tags.includes(m.tag) && (special.has(m.tag) || !classified));
   }
 
   // --- Wikidata (cache {titles, labels} partagé avec la version Python) -------------
 
-  function wdLabels(cache, title) {
+  function wdLabels(cache, title, props = ["P31", "P106"]) {
     const e = (cache && cache.titles && cache.titles[title]) || {};
     const lab = (q) => (cache.labels && cache.labels[q]) || q;
-    return [...(e.P31 || []).map(lab), ...(e.P106 || []).map(lab)];
+    return props.flatMap((p) => (e[p] || []).map(lab));
   }
 
   const wdText = (cache, title) => wdLabels(cache, title).join(" ; ");
+  /** Nature seule (P31 : « film », « album »…), sans les occupations. */
+  const wdNature = (cache, title) => wdLabels(cache, title, ["P31"]).join(" ; ");
 
   // --- Motifs récurrents (mot de tête de la description) ---------------------------
 
@@ -135,14 +195,14 @@
     return { candidates, words, wdWords };
   }
 
-  /** Compare les suggestions aux étiquettes déjà posées à la main. */
-  function agreement(cards, rules, wdTextOf) {
-    const active = new Set(rules.map((r) => r.name));
+  /** Compare les suggestions aux étiquettes déjà posées à la main (catégories seulement). */
+  function agreement(cards, rules, wdTextOf, wdNatureOf = () => null) {
+    const active = new Set(rules.filter((r) => !r.shiny).map((r) => r.name));
     const tagged = cards.filter((c) => c.tags.some((t) => active.has(t)));
     let ok = 0;
     const misses = [];
     for (const c of tagged) {
-      const pred = new Set(matchCard(c, rules, wdTextOf(c.title)).map((m) => m.tag));
+      const pred = new Set(matchCard(c, rules, wdTextOf(c.title), wdNatureOf(c.title)).map((m) => m.tag).filter((t) => active.has(t)));
       const real = c.tags.filter((t) => active.has(t));
       if (real.some((t) => pred.has(t))) ok++;
       else misses.push({ card: c, real: [...new Set(real)].sort(), pred: [...pred].sort() });
@@ -155,22 +215,23 @@
     const R = compileRules(rules);
     const T = compileRules(themes);
     const wdTextOf = (t) => (wd ? wdText(wd, t) : "");
+    const wdNatureOf = (t) => (wd ? wdNature(wd, t) : null);
     const wdLabelsOf = wd ? (t) => wdLabels(wd, t) : null;
+    const special = shinyNames(R);
 
     const todo = new Map(R.map((r) => [r.name, []]));
     const rows = [];
     const unmatched = [];
     for (const c of cards) {
-      const matches = matchCard(c, R, wdTextOf(c.title));
+      const matches = suggest(c, R, wdTextOf(c.title), wdNatureOf(c.title));
       rows.push({ card: c, matches });
-      if (c.tags.length) continue;
       for (const m of matches) {
         todo.get(m.tag).push({ card: c, hits: m.hits, others: matches.filter((o) => o.tag !== m.tag).map((o) => o.tag) });
       }
-      if (!matches.length) unmatched.push(c);
+      if (!categoryTags(c, R).length && matches.every((m) => special.has(m.tag))) unmatched.push(c);
     }
     const rep = suggestThemes(unmatched, T, R.map((r) => r.name), minCount, wdTextOf, wdLabelsOf);
-    const untagged = cards.filter((c) => !c.tags.length);
+    const untagged = cards.filter((c) => !categoryTags(c, R).length);
     return {
       rows,
       todo: R.map((r) => ({ tag: r.name, color: r.color, items: todo.get(r.name) })),
@@ -178,16 +239,19 @@
       themes: rep.candidates,
       words: rep.words,
       wdWords: rep.wdWords,
-      agreement: agreement(cards, R, wdTextOf),
+      agreement: agreement(cards, R, wdTextOf, wdNatureOf),
       stats: {
         cards: cards.length,
         tagged: cards.length - untagged.length,
-        suggested: rows.filter((r) => !r.card.tags.length && r.matches.length).length,
+        suggested: rows.filter((r) => r.matches.length).length,
         unmatched: unmatched.length,
       },
     };
   }
 
-  WMT.core = { RARITIES, norm, compilePattern, patternError, compileRules, matchCard, headWord, wdLabels, wdText, suggestThemes, agreement, analyze };
+  WMT.core = {
+    RARITIES, norm, compilePattern, patternError, compileRules, qualifier, matchCard, shinyNames, categoryTags,
+    suggest, headWord, wdLabels, wdText, wdNature, suggestThemes, agreement, analyze,
+  };
   if (typeof module !== "undefined") module.exports = WMT.core;
 })(globalThis);

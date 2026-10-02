@@ -26,6 +26,7 @@ class TagRule:
     title_keywords: list[re.Pattern] = field(default_factory=list)
     raw_keywords: list[str] = field(default_factory=list)
     raw_title_keywords: list[str] = field(default_factory=list)
+    shiny: bool = False  # étiquette posée sur toutes les cartes shiny, en plus de leur catégorie
 
 
 def _compile(patterns: list[str]) -> list[re.Pattern]:
@@ -48,6 +49,7 @@ def load_rules(path: Path) -> list[TagRule]:
                 title_keywords=_compile(spec.get("title_keywords", [])),
                 raw_keywords=kw,
                 raw_title_keywords=spec.get("title_keywords", []),
+                shiny=bool(spec.get("shiny", False)),
             )
         )
     return rules
@@ -60,27 +62,81 @@ class Match:
     hits: list[str]
 
 
-def match_card(card: Card, rules: list[TagRule], extra_text: str = "") -> list[Match]:
-    """Renvoie les étiquettes qui matchent, triées par score décroissant
-    (puis ordre du fichier de règles)."""
+_QUALIFIER = re.compile(r"\(([^()]*)\)\s*$")
+
+
+def qualifier(title: str) -> str:
+    """Précision entre parenthèses en fin de titre : « Couplage (théorie des graphes) »."""
+    m = _QUALIFIER.search(title)
+    return m.group(1) if m else ""
+
+
+def match_card(card: Card, rules: list[TagRule], extra_text: str = "",
+               nature_text: str | None = None) -> list[Match]:
+    """Étiquettes qui matchent, triées par score décroissant (puis ordre des règles).
+
+    Indices propres à la carte : description, précision du titre entre parenthèses,
+    motifs de titre. Wikidata (extra_text = nature + occupations) ne fait que compléter :
+    si une règle a un indice propre, les règles qui n'ont que Wikidata sont écartées.
+    Sans indice propre, on se rabat sur Wikidata ; si la carte a une description, seulement
+    sur sa nature (nature_text, P31) : les occupations (P106) y sont trop bruitées
+    (un écrivain « scénariste » à ses heures). Les règles shiny matchent les cartes shiny.
+    """
     desc = norm(card.description)
-    extra = norm(extra_text)
+    qual = norm(qualifier(card.title))
     title = norm(card.title)
-    out = []
+    extra = norm(extra_text)
+    nature = extra if nature_text is None or not desc else norm(nature_text)
+    own_found, wd_found, shiny = [], [], []
     for rule in rules:
-        hits = []
+        if rule.shiny:
+            if card.shiny:
+                shiny.append(Match(rule.name, 1, ["shiny"]))
+            continue
+        own, wd, fallback = set(), set(), set()
         for p in rule.keywords:
-            m = p.search(desc) or (p.search(extra) if extra else None)
+            m = p.search(desc) or (p.search(qual) if qual else None)
             if m:
-                hits.append(m.group(0))
+                own.add(m.group(0))
+                continue
+            m = p.search(extra) if extra else None
+            if m:
+                wd.add(m.group(0))
+                m = p.search(nature) if nature else None
+                if m:
+                    fallback.add(m.group(0))
         for p in rule.title_keywords:
             m = p.search(title)
             if m:
-                hits.append(f"titre:{m.group(0)}")
-        if hits:
-            out.append(Match(rule.name, len(set(hits)), sorted(set(hits))))
+                own.add(f"titre:{m.group(0)}")
+        if own:
+            hits = sorted(own | wd)
+            own_found.append(Match(rule.name, len(hits), hits))
+        elif fallback:
+            wd_found.append(Match(rule.name, len(fallback), sorted(fallback)))
+    out = own_found or wd_found
     out.sort(key=lambda m: -m.score)  # tri stable => ordre du fichier en cas d'égalité
-    return out
+    return out + shiny
+
+
+def shiny_names(rules: list[TagRule]) -> set[str]:
+    return {r.name for r in rules if r.shiny}
+
+
+def category_tags(card: Card, rules: list[TagRule]) -> list[str]:
+    """Étiquettes posées qui classent la carte (toutes sauf les étiquettes shiny)."""
+    special = shiny_names(rules)
+    return [t for t in card.tags if t not in special]
+
+
+def suggest(card: Card, rules: list[TagRule], extra_text: str = "",
+            nature_text: str | None = None) -> list[Match]:
+    """Étiquettes à poser : la catégorie si la carte n'en a pas encore, et l'étiquette shiny
+    sur une carte shiny qui ne l'a pas, même déjà classée."""
+    special = shiny_names(rules)
+    classified = bool(category_tags(card, rules))
+    return [m for m in match_card(card, rules, extra_text, nature_text)
+            if m.tag not in card.tags and (m.tag in special or not classified)]
 
 
 # --- Motifs récurrents (mot de tête de la description) -----------------------
@@ -160,14 +216,18 @@ def suggest_themes(
     return Report(cand, rec, rec_wd)
 
 
-def agreement(cards: list[Card], rules: list[TagRule], wikidata_text: dict[str, str]):
-    """Compare les suggestions aux étiquettes que tu as déjà posées à la main.
+def agreement(cards: list[Card], rules: list[TagRule], wikidata_text: dict[str, str],
+              wikidata_nature: dict[str, str] | None = None):
+    """Compare les suggestions aux étiquettes que tu as déjà posées à la main
+    (catégories seulement : l'étiquette shiny ne dit rien des règles).
     Renvoie (n_cartes_étiquetées, n_d'accord, liste des désaccords)."""
-    active = {r.name for r in rules}
+    active = {r.name for r in rules if not r.shiny}
     tagged = [c for c in cards if any(t in active for t in c.tags)]
     ok, misses = 0, []
     for c in tagged:
-        pred = {m.tag for m in match_card(c, rules, wikidata_text.get(c.title, ""))}
+        nature = wikidata_nature.get(c.title, "") if wikidata_nature is not None else None
+        pred = {m.tag for m in match_card(c, rules, wikidata_text.get(c.title, ""), nature)
+                if m.tag in active}
         real = {t for t in c.tags if t in active}
         if real & pred:
             ok += 1

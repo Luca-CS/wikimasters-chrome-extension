@@ -20,21 +20,26 @@ ROOT = Path(__file__).resolve().parent.parent
 GAME_COLORS = {"Automobile": "#86efac", "Maths": "#01c7fc", "Mythologie": "#fb7185", "Musique": "#5eead4"}
 PALETTE = ["#fbbf24", "#a78bfa", "#f472b6", "#60a5fa", "#fb923c", "#a3e635", "#f87171", "#22d3ee",
            "#e879f9", "#facc15", "#4ade80", "#38bdf8", "#c084fc", "#2dd4bf", "#fda4af", "#93c5fd"]
+SHINY_COLOR = "#f0abfc"
+
+
+def rule(name: str, spec: dict, color: str) -> dict:
+    out = {"name": name, "color": SHINY_COLOR if spec.get("shiny") else GAME_COLORS.get(name, color),
+           "keywords": spec.get("keywords", []), "titleKeywords": spec.get("title_keywords", [])}
+    if spec.get("shiny"):
+        out["shiny"] = True
+    return out
 
 
 def rules(path: Path, offset: int = 0) -> list[dict]:
     tags = tomllib.loads(path.read_text(encoding="utf-8")).get("tags", {})
-    return [{"name": name,
-             "color": GAME_COLORS.get(name, PALETTE[(i + offset) % len(PALETTE)]),
-             "keywords": spec.get("keywords", []),
-             "titleKeywords": spec.get("title_keywords", [])}
-            for i, (name, spec) in enumerate(tags.items())]
+    return [rule(name, spec, PALETTE[(i + offset) % len(PALETTE)]) for i, (name, spec) in enumerate(tags.items())]
 
 
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     config = {
-        "version": 2,
+        "version": 3,
         "rules": rules(ROOT / "rules.toml"),
         "themes": rules(ROOT / "themes.toml", offset=5),
         "settings": {
@@ -49,9 +54,6 @@ def main():
             "accountType": "free",
             "notifyFull": True,
             "notifyEach": False,
-            "emailFull": False,
-            "ntfyToken": "",
-            "ntfyTopic": "",
             # Écran d'ouverture : défilement des cartes puis « Continuer » (après ton clic sur Ouvrir).
             "autoReveal": True,
             "revealDelay": 200,

@@ -12,7 +12,7 @@ import tomllib
 import webbrowser
 from pathlib import Path
 
-from .classify import agreement, load_rules, match_card, suggest_themes
+from .classify import agreement, category_tags, load_rules, shiny_names, suggest, suggest_themes
 from .parser import Card, parse_text
 from .report import card_json, write_html
 
@@ -85,6 +85,7 @@ def main(argv=None):
     print(f"{len(cards)} cartes lues, {len(rules)} étiquettes actives.")
 
     wd_text: dict[str, str] = {}
+    wd_nature: dict[str, str] = {}
     wd_labels: dict[str, list[str]] = {}
     if args.wikidata:
         from .wikidata import WikidataClient
@@ -99,30 +100,32 @@ def main(argv=None):
             labs = d["P31"] + d["P106"]
             wd_labels[t] = labs
             wd_text[t] = " ; ".join(labs)
+            wd_nature[t] = " ; ".join(d["P31"])
 
     args.output.mkdir(parents=True, exist_ok=True)
+    nature = lambda c: wd_nature.get(c.title, "") if args.wikidata else None  # noqa: E731
+    specials = shiny_names(rules)
 
     # 1. Suggestions carte par carte
     rows, todo = [], {r.name: [] for r in rules}
     todo_json = {r.name: [] for r in rules}
     untagged_unmatched: list[Card] = []
     for c in cards:
-        matches = match_card(c, rules, wd_text.get(c.title, ""))
-        already = bool(c.tags)
-        if not already:
-            for m in matches:
-                todo[m.tag].append((c, len(matches) > 1))
-                todo_json[m.tag].append(card_json(
-                    c, hits=m.hits, others=[o.tag for o in matches if o.tag != m.tag],
-                    wikidata=wd_text.get(c.title, "")))
-            if not matches:
-                untagged_unmatched.append(c)
+        matches = suggest(c, rules, wd_text.get(c.title, ""), nature(c))
+        for m in matches:
+            todo[m.tag].append((c, len(matches) > 1))
+            todo_json[m.tag].append(card_json(
+                c, hits=m.hits, others=[o.tag for o in matches if o.tag != m.tag],
+                wikidata=wd_text.get(c.title, "")))
+        if not category_tags(c, rules) and all(m.tag in specials for m in matches):
+            untagged_unmatched.append(c)
         rows.append({
-            "page": c.page, "position": c.position, "rarete": c.rarity, "titre": c.title,
+            "page": c.page, "position": c.position, "rarete": c.rarity + (" shiny" if c.shiny else ""),
+            "titre": c.title,
             "description": c.description, "etiquettes_actuelles": " | ".join(c.tags),
-            "suggestion": "" if already else (matches[0].tag if matches else ""),
-            "autres_suggestions": "" if already else " | ".join(m.tag for m in matches[1:]),
-            "motifs": "" if already else " ; ".join(f"{m.tag}: {', '.join(m.hits)}" for m in matches),
+            "suggestion": matches[0].tag if matches else "",
+            "autres_suggestions": " | ".join(m.tag for m in matches[1:]),
+            "motifs": " ; ".join(f"{m.tag}: {', '.join(m.hits)}" for m in matches),
             "wikidata": wd_text.get(c.title, ""),
             "attaque": c.attack, "defense": c.defense,
         })
@@ -135,7 +138,7 @@ def main(argv=None):
     # 2. Liste de travail : quoi étiqueter, dans l'ordre d'affichage
     lines = ["# Cartes à étiqueter", "",
              "Ordre = ordre d'affichage dans ta collection. ⚠ = la carte matche plusieurs étiquettes.",
-             "Les cartes déjà étiquetées ne sont pas listées.", ""]
+             "Les cartes déjà classées ne sont pas listées (sauf pour l'étiquette shiny).", ""]
     total = 0
     for tag, items in todo.items():
         if not items:
@@ -149,9 +152,9 @@ def main(argv=None):
     (args.output / "a_etiqueter.md").write_text("\n".join(lines), encoding="utf-8")
 
     # 3. Thèmes récurrents + fiabilité des règles
-    untagged = [c for c in cards if not c.tags]
+    untagged = [c for c in cards if not category_tags(c, rules)]
     rep = suggest_themes(untagged_unmatched, themes, active, args.min_count, wd_text, wd_labels)
-    n_tagged, n_ok, misses = agreement(cards, rules, wd_text)
+    n_tagged, n_ok, misses = agreement(cards, rules, wd_text, wd_nature if args.wikidata else None)
 
     s = ["# Suggestions", ""]
     s += [f"- {len(cards)} cartes, {len(cards) - len(untagged)} déjà étiquetées, "
