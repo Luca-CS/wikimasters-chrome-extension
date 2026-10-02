@@ -78,12 +78,12 @@
   const knownTags = () => new Set([...config.rules, ...config.themes].map((r) => r.name));
   const colorOf = (tag) => (config.rules.find((r) => r.name === tag) || {}).color || "#34d399";
 
+  /** Étiquettes à poser (catégorie si la carte n'en a pas, Shiny sur une carte shiny). */
   function suggestionsFor(card) {
-    if (card.tags.length) return [];
-    const key = card.title + "\n" + card.desc;
+    const key = [card.title, card.desc, card.tags.join("\u0001"), card.shiny ? "✦" : ""].join("\n");
     if (!memo.has(key)) {
-      const extra = config.settings.wikidata ? core.wdText(wd, card.title) : "";
-      memo.set(key, core.matchCard(card, rules, extra));
+      const on = config.settings.wikidata && wd;
+      memo.set(key, core.suggest(card, rules, on ? core.wdText(wd, card.title) : "", on ? core.wdNature(wd, card.title) : null));
     }
     return memo.get(key);
   }
@@ -214,18 +214,74 @@
     return false;
   }
 
-  /** Attend que tu aies validé une éventuelle vérification et que l'onglet soit visible. */
-  async function waitReady(job) {
-    if (dom.blockingDialog()) {
-      log("vérification affichée : pause");
-      note("Vérification affichée : à toi de jouer. Ça reprend juste après.", "warn");
-      while (!job.abort && dom.blockingDialog()) await sleep(300);
-      if (!job.abort) {
-        note(null);
-        await wait(job, 500);
-      }
+  const paused = () => document.hidden || dom.blockingDialog();
+  let pauseShown = false;
+
+  /** Message de pause : vérification « robot », fenêtre du site ou onglet masqué. */
+  function showPause(on) {
+    if (on === pauseShown) return;
+    pauseShown = on;
+    if (on && !document.hidden) {
+      const what = dom.blockingText();
+      log("pause :", what || "fenêtre du site affichée");
+      note("Pause : une fenêtre du site est affichée (vérification, annonce…). Ça reprend tout seul quand elle disparaît.", "warn");
+    } else if (!on) {
+      note(null);
     }
-    while (!job.abort && document.hidden) await sleep(300);
+  }
+
+  /** Attend la fin d'une vérification, d'une fenêtre du site, et que l'onglet soit visible. */
+  async function waitReady(job) {
+    if (!paused()) return;
+    while (!job.abort && paused()) {
+      showPause(true);
+      await sleep(300);
+    }
+    showPause(false);
+    if (!job.abort) await wait(job, 500);
+  }
+
+  /**
+   * Attend `test()` pendant `ms` de temps « actif » : le chrono s'arrête tant qu'une fenêtre du
+   * site est affichée ou que l'onglet est masqué (une annonce de quelques secondes ne fait donc
+   * plus échouer l'attente). Renvoie false tout de suite en cas de sanction anti-triche.
+   */
+  async function waitActive(job, test, ms) {
+    let left = ms;
+    while (!job.abort && left > 0) {
+      if (test()) {
+        showPause(false);
+        return true;
+      }
+      if (dom.sanction()) return false;
+      const hold = paused();
+      showPause(hold);
+      await sleep(100);
+      if (!hold) left -= 100;
+    }
+    showPause(false);
+    return !job.abort && !!test();
+  }
+
+  /** La page affiche une sanction anti-triche : on arrête tout, sans insister. */
+  function stopForSanction() {
+    stopAll();
+    const message = "Le site affiche une sanction anti-triche : tout l'automatique est arrêté. Ne relance pas l'enchaînement, regarde tes messages sur le site.";
+    log(message);
+    note(message, "err");
+  }
+
+  /** Une carte L arrive avec une animation (et se révèle shiny à la fin) : on la laisse finir. */
+  async function waitCardAnimation(job, card) {
+    if (!card || card.rarity !== "L" || !document.getAnimations) return;
+    const busy = () => document.getAnimations().some((a) => {
+      const t = a.effect && a.effect.target;
+      return a.playState === "running" && Number.isFinite(a.effect.getTiming().iterations) &&
+        t instanceof Element && (t.contains(card.el) || card.root.contains(t));
+    });
+    const end = Date.now() + 3000;
+    while (!job.abort && Date.now() < end && busy()) await sleep(100);
+    await wait(job, 450); // la marque shiny apparaît 350 ms après l'animation
   }
 
   /** Délai « naturel » : base × rythme (log-normal corrélé) + bonus des cartes au-dessus de SR. */
@@ -240,8 +296,10 @@
     try {
       for (let step = 0; step < 40 && !job.abort; step++) {
         if (!dom.reveal()) return; // écran fermé
+        if (dom.sanction()) return stopForSanction();
         const card = dom.cards(document, knownTags())[0];
         await wait(job, delay(Math.max(100, +config.settings.revealDelay || 200), card));
+        await waitCardAnimation(job, card);
         await waitReady(job);
         if (job.abort) return;
         // La carte affichée est analysée avant de passer à la suivante, même en pleine animation.
@@ -250,16 +308,25 @@
         renderPulled(dom.reveal());
         const now = dom.reveal();
         if (!now) return;
-        const nav = dom.revealNav();
-        if (now.index >= now.total) {
-          if (!nav.cont) return log("bouton « Continuer » introuvable");
-          nav.cont.click();
+        const last = now.index >= now.total;
+        // Bouton pas encore prêt (animation, fenêtre du site…) : on patiente au lieu d'abandonner.
+        const button = () => {
+          const nav = dom.revealNav();
+          const b = last ? nav.cont : nav.next;
+          return b && !b.disabled ? b : null;
+        };
+        if (!(await waitActive(job, button, 10000))) {
+          if (dom.sanction()) return stopForSanction();
+          if (!job.abort) log(last ? "bouton « Continuer » introuvable ou désactivé" : "bouton « suivant » introuvable ou désactivé");
+          return;
+        }
+        if (last) {
+          button().click();
           log("« Continuer » cliqué", chain ? `(enchaînement : ${chain.left} paquet(s) à ouvrir)` : "");
           if (chain && !chain.abort) chainNext(chain);
           return;
         }
-        if (!nav.next || nav.next.disabled) return log("bouton « suivant » introuvable ou désactivé");
-        nav.next.click();
+        button().click();
         await waitFor(job, () => {
           const r = dom.reveal();
           return !r || r.index !== now.index;
@@ -283,47 +350,64 @@
     button.click();
   }
 
+  const RETRY_PAUSES = [3000, 8000]; // après un message d'erreur du site (réseau, trop de requêtes…)
+  // Message d'erreur qui signale un refus pour automatisation : on n'insiste jamais.
+  const REFUSAL = /triche|robot|\bbot\b|script|automati|sanction|bloqu|restreint/i;
+
   /** Après « Continuer » : rouvre un paquet si l'enchaînement en a encore à ouvrir. */
   async function chainNext(job) {
     if (job.left < 1) return endChain(job, `✓ Enchaînement terminé : ${plural(job.total, "paquet")} ouvert${job.total > 1 ? "s" : ""}.`);
-    // Retour sur la page Paquets, avec un bouton « Ouvrir » de nouveau cliquable.
-    const ready = await waitFor(job, () => {
-      const b = dom.openButton();
-      return !dom.reveal() && b && !b.disabled;
-    }, 15000);
-    if (job.abort) return;
-    const live = dom.packs();
-    if (live && live.count < 1) return endChain(job, "Plus de paquet disponible : enchaînement terminé.");
-    if (!ready) {
-      return endChain(job, dom.openButton()
-        ? "Le bouton « Ouvrir » est resté désactivé : enchaînement arrêté."
-        : "Bouton « Ouvrir » introuvable après « Continuer » : enchaînement arrêté (exporte la page pour que je l'adapte).");
-    }
-    await wait(job, delay(CHAIN_PAUSE));
-    await waitReady(job);
-    if (job.abort) return;
-    const button = dom.openButton();
-    if (!button || button.disabled) return endChain(job, "Le bouton « Ouvrir » n'est plus disponible : enchaînement arrêté.");
-    job.left--;
-    renderAuto();
-    log(`ouverture du paquet ${job.total - job.left} / ${job.total}`);
-    button.click();
-    let opened = await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 1500);
-    if (!opened && !job.abort) {
-      log("pas de réaction au clic : essai avec un appui complet");
-      const again = dom.openButton();
-      if (again && !again.disabled) press(again);
-      opened = await waitFor(job, () => dom.reveal() || dom.blockingDialog(), 6000);
-    }
-    if (job.abort || dom.reveal()) return; // le défilement prend le relais et rappellera chainNext
-    if (dom.blockingDialog()) {
+    for (let attempt = 0; ; attempt++) {
+      // Retour sur la page Paquets, avec un bouton « Ouvrir » de nouveau cliquable. Le chrono
+      // s'arrête pendant une vérification ou une fenêtre du site (le bouton peut être grisé).
+      const ready = await waitActive(job, () => {
+        const b = dom.openButton();
+        return !dom.reveal() && b && !b.disabled;
+      }, 30000);
+      if (job.abort) return;
+      if (dom.sanction()) return stopForSanction();
+      const live = dom.packs();
+      if (live && live.count < 1) return endChain(job, "Plus de paquet disponible : enchaînement terminé.");
+      if (!ready) {
+        return endChain(job, dom.openButton()
+          ? "Le bouton « Ouvrir » est resté désactivé : enchaînement arrêté."
+          : "Bouton « Ouvrir » introuvable après « Continuer » : enchaînement arrêté (exporte la page pour que je l'adapte).");
+      }
+      await wait(job, delay(CHAIN_PAUSE) + (attempt ? RETRY_PAUSES[attempt - 1] : 0));
       await waitReady(job);
-      if (job.abort || (await waitFor(job, () => dom.reveal(), 8000))) return;
+      if (job.abort) return;
+      const button = dom.openButton();
+      if (!button || button.disabled) continue; // regrisé entre-temps : on attend de nouveau
+      log(`ouverture du paquet ${job.total - job.left + 1} / ${job.total}` + (attempt ? ` (essai ${attempt + 1})` : ""));
+      button.click();
+      let opened = await waitActive(job, () => !!dom.reveal(), 1500);
+      if (!opened && !job.abort && !dom.sanction() && !dom.packError()) {
+        log("pas de réaction au clic : essai avec un appui complet");
+        const again = dom.openButton();
+        if (again && !again.disabled) press(again);
+        opened = await waitActive(job, () => !!dom.reveal(), 6000);
+      }
+      if (job.abort) return;
+      if (opened) {
+        job.left--; // le défilement prend le relais et rappellera chainNext
+        renderAuto();
+        return;
+      }
+      if (dom.sanction()) return stopForSanction();
+      const error = dom.packError();
+      if (error && REFUSAL.test(error)) return endChain(job, `Le site a refusé l'ouverture (« ${error} ») : enchaînement arrêté.`, true);
+      if (error && attempt < RETRY_PAUSES.length) {
+        log(`le site n'a pas ouvert le paquet (« ${error} ») : nouvel essai`);
+        note(`Le site n'a pas ouvert le paquet (« ${error} ») : nouvel essai dans quelques secondes.`, "warn", null, 10000);
+        continue;
+      }
+      // Aucune réaction (ou erreurs répétées) : on ne force rien, c'est à toi de cliquer
+      // (ton appui relance l'enchaînement).
+      const target = dom.openButton();
+      if (target) target.focus();
+      return endChain(job, "Le site n'a pas ouvert le paquet suivant" + (error ? ` (« ${error} »)` : "") +
+        " : clique sur « Ouvrir » (ou appuie sur Entrée) pour continuer.", true);
     }
-    // Le site n'a pas réagi : on ne force rien, c'est à toi de cliquer (l'enchaînement repartira).
-    const target = dom.openButton();
-    if (target) target.focus();
-    endChain(job, "Le site n'a pas ouvert le paquet suivant : clique sur « Ouvrir » (ou appuie sur Entrée) pour continuer.", true);
   }
 
   function endChain(job, message, sticky = false) {
@@ -347,6 +431,7 @@
   }
 
   function stopAll(message) {
+    pauseShown = false;
     if (chain) chain.abort = true;
     chain = null;
     if (autoRun) {
@@ -362,6 +447,14 @@
 
   const onOpenButton = (el) => route === "pulls" && el instanceof Element && dom.isOpenButton(el.closest("button"));
   const fromPanel = (e) => !!ui && e.composedPath().includes(ui.host);
+  /** Clic dans une fenêtre du site (ajoutée à <body>, hors de la page principale) : annonce, toast… */
+  function inSitePopup(e) {
+    const main = document.querySelector("main");
+    const top = e.composedPath().find((n) => n instanceof Element && n.parentElement === document.body);
+    return !!main && !!top && !top.contains(main);
+  }
+  // Fermer une fenêtre du site (clic dessus ou Échap) n'est pas une reprise en main.
+  const handsOff = (e) => dom.blockingDialog() || inSitePopup(e);
   // Touches qui ne sont pas une saisie (Alt+Tab, Ctrl, Windows, volume…) : elles n'arrêtent rien.
   const SILENT_KEYS = /^(Shift|Control|Alt|AltGraph|Meta|OS|Super|Hyper|Fn|FnLock|CapsLock|NumLock|ScrollLock|Audio.*|Media.*|Launch.*|Browser.*|Unidentified)$/;
 
@@ -374,7 +467,7 @@
       stopAll();
       return startChain();
     }
-    if ((autoRun || chain) && !dom.blockingDialog()) stopAll("Automatique arrêté : tu as pris la main.");
+    if ((autoRun || chain) && !handsOff(e)) stopAll("Automatique arrêté : tu as pris la main.");
   }, true);
 
   // Touche du clavier : Entrée / Espace sur « Ouvrir » (re)lance l'enchaînement ; sinon, arrêt.
@@ -384,7 +477,7 @@
       stopAll();
       return startChain();
     }
-    if ((autoRun || chain) && !dom.blockingDialog()) stopAll("Automatique arrêté : tu as pris la main.");
+    if ((autoRun || chain) && !handsOff(e) && !(e.key === "Escape" && pauseShown)) stopAll("Automatique arrêté : tu as pris la main.");
   }, true);
 
   function renderAuto() {
@@ -414,7 +507,7 @@
             t.style.setProperty("--c", colorOf(m.tag));
             return t;
           })
-        : [h("span", { class: "muted" }, card.tags.length ? "déjà étiquetée" : "aucune suggestion")];
+        : [h("span", { class: "muted" }, core.categoryTags(card, rules).length ? "déjà étiquetée" : "aucune suggestion")];
       return h("div", { class: "pull" }, rarity, h("span", { class: "t" }, card.title), tags);
     }));
     ui.fabN.hidden = !todo;
@@ -495,8 +588,7 @@
     else ui.packCount.textContent = "Compteur pas encore relevé.";
     const plan = s.accountType === "pro" ? "Pro, 1 paquet / 3 min" : "gratuit, 1 paquet / 10 min";
     ui.packInfo.textContent = est ? `${packs.describe(est)} · compte ${plan}` : `Compte ${plan}.`;
-    const channels = [s.notifyFull && "notification", s.emailFull && "e-mail"].filter(Boolean);
-    ui.packNotif.textContent = channels.length ? `Rappel quand c'est plein : ${channels.join(" + ")}.` : "Aucun rappel activé.";
+    ui.packNotif.textContent = s.notifyFull ? "Notification quand c'est plein." : "Aucun rappel activé.";
     ui.fabLabel.textContent = count != null ? `Tagger · ${count}/${max}` : "Tagger";
   }
 
@@ -840,7 +932,8 @@
   function mount() {
     buildPanel();
     observer = new MutationObserver(onMutations);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    // « disabled » : un bouton qui redevient cliquable relance le défilement s'il s'était arrêté.
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["disabled"] });
     if (route === "pulls") packsTimer = setInterval(() => renderPacks(), 30000);
     refresh();
     maybePrompt();

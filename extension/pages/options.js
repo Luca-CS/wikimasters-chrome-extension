@@ -72,9 +72,11 @@ function ruleEditor(key, i, open) {
           ? $("button", { class: "btn small", onclick: () => { update({ colorLocked: false }); renderList(key); } }, "Reprendre la couleur du jeu")
           : null,
         $("button", { class: "btn small danger", onclick: () => removeRule(key, i) }, "Supprimer")),
-      $("div", { class: "cols" },
-        $("label", {}, "Mots-clés cherchés dans la description (et dans Wikidata), un par ligne", kw),
-        $("label", {}, "Mots-clés cherchés dans le titre", tkw)),
+      rule.shiny
+        ? $("div", { class: "d" }, "Posée sur toutes les cartes shiny (✦), en plus de leur catégorie, même si elles sont déjà étiquetées.")
+        : $("div", { class: "cols" },
+          $("label", {}, "Mots-clés cherchés dans la description, la précision du titre entre parenthèses (et Wikidata), un par ligne", kw),
+          $("label", {}, "Mots-clés cherchés dans le titre", tkw)),
       isTheme ? null : $("div", { class: "d" },
         rule.colorLocked ? "Couleur choisie à la main." : "Couleur reprise automatiquement du jeu dès que l'étiquette apparaît sur une carte."),
       err));
@@ -91,7 +93,7 @@ function ruleEditor(key, i, open) {
     details.classList.toggle("invalid", bad.length > 0);
     const n = (r.keywords || []).length;
     const nt = (r.titleKeywords || []).length;
-    count.textContent = bad.length
+    count.textContent = r.shiny ? "toutes les cartes shiny" : bad.length
       ? `${bad.length} motif${bad.length > 1 ? "s" : ""} invalide${bad.length > 1 ? "s" : ""}`
       : `${n} mot${n > 1 ? "s" : ""}-clé${n > 1 ? "s" : ""}${nt ? ` · ${nt} pour le titre` : ""}`;
   }
@@ -207,34 +209,22 @@ function fillSettings() {
 
 // --- Paquets et rappels ------------------------------------------------------------------
 
-function randomTopic() {
-  const bytes = crypto.getRandomValues(new Uint8Array(10));
-  return "wikimasters-" + [...bytes].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
-}
-
 async function renderPacksInfo() {
   const state = await store.get("packs");
-  const s = config.settings;
-  const est = WMT.packs.estimate(state, WMT.packs.cooldownMs(s));
-  let text = state
+  const est = WMT.packs.estimate(state, WMT.packs.cooldownMs(config.settings));
+  byId("packs-info").textContent = state
     ? `Dernier relevé sur la page Paquets : ${state.count} / ${state.max} à ${WMT.packs.fmtTime(state.at)}. ` +
       `Estimation actuelle : ${est.count} / ${est.max}, ${WMT.packs.describe(est)}.`
     : "Pas encore de relevé : passe sur la page Paquets de WikiMasters avec l'extension active.";
-  if (s.emailFull && !s.ntfyToken) text += " Renseigne ton jeton ntfy pour recevoir l'e-mail.";
-  byId("packs-info").textContent = text;
 }
 
-async function testNotify(email) {
+async function testNotify() {
   const out = byId("test-result");
   out.textContent = "Envoi…";
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    await save(); // le jeton ou le topic viennent peut-être d'être saisis
-  }
   try {
-    const res = await chrome.runtime.sendMessage({ type: "testNotify", email });
+    const res = await chrome.runtime.sendMessage({ type: "testNotify" });
     if (!res || !res.ok) throw new Error((res && res.error) || "pas de réponse de l'extension");
-    out.textContent = email ? "✓ Notification et e-mail envoyés (vérifie aussi tes spams)." : "✓ Notification envoyée.";
+    out.textContent = "✓ Notification envoyée.";
   } catch (e) {
     out.textContent = `✗ ${e.message}`;
   }
@@ -309,10 +299,6 @@ function renderAll() {
 async function init() {
   config = await store.getConfig();
   lastSaved = JSON.stringify(config);
-  if (!config.settings.ntfyTopic) {
-    config.settings = { ...config.settings, ntfyTopic: randomTopic() };
-    await save();
-  }
   renderAll();
   bindSettings();
   bindData();
@@ -320,8 +306,7 @@ async function init() {
   byId("add-theme").addEventListener("click", () => addRule("themes"));
   byId("t-title").addEventListener("input", runTester);
   byId("t-desc").addEventListener("input", runTester);
-  byId("test-notif").addEventListener("click", () => testNotify(false));
-  byId("test-mail").addEventListener("click", () => testNotify(true));
+  byId("test-notif").addEventListener("click", testNotify);
   renderDataInfo();
   renderPacksInfo();
   setInterval(renderPacksInfo, 30000);

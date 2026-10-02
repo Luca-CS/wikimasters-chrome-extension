@@ -4,6 +4,10 @@
 //   opendown      « Ouvrir » réagit à l'appui et remplace l'écran aussitôt (pas de « click »)
 //   trustedonly   « Ouvrir » ignore les clics non humains (event.isTrusted)
 //   disabledflash « Ouvrir » désactivé 1,5 s après « Continuer »
+//   popup         après le 1er paquet : fenêtre plein écran sans rôle (annonce) pendant 20 s, « Ouvrir » grisé
+//   openerror     la 1re ouverture automatique échoue avec « Erreur réseau. Réessayez. »
+//   sanction      après le 1er paquet : « Sanction anti-triche active », « Ouvrir » grisé
+//   toast         après le 1er paquet : petit toast avec un bouton de fermeture (#toast-close)
 (function () {
   if (STATE !== "chain") return;
   const DECK = [
@@ -19,6 +23,14 @@
   function open(e, sync) {
     if (sim.count < 1 || document.getElementById("robot")) return;
     if (PARAMS.has("trustedonly") && !e.isTrusted) { sim.ignored++; return; }
+    if (PARAMS.has("openerror") && !e.isTrusted && !sim.errored) {
+      sim.errored = Date.now();
+      const err = document.createElement("div");
+      err.className = "rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400 max-w-sm text-center";
+      err.textContent = "Erreur réseau. Réessayez.";
+      m.firstElementChild.append(err);
+      return;
+    }
     sim.count--;
     sim.opens.push({ t: Date.now(), trusted: e.isTrusted, type: e.type });
     sync ? renderReveal() : setTimeout(renderReveal, 200);
@@ -34,6 +46,35 @@
     }
     if (PARAMS.has("opendown")) btn.addEventListener("pointerdown", (e) => open(e, true));
     else btn.addEventListener("click", (e) => open(e, false));
+    const afterFirst = sim.continues === 1 && !sim.extraShown;
+    if (afterFirst && PARAMS.has("popup")) {
+      sim.extraShown = Date.now();
+      btn.disabled = true;
+      const pop = document.createElement("div");
+      pop.style.cssText = "position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.7)";
+      pop.innerHTML = '<div style="margin:20vh auto;width:300px;padding:20px;background:#fff;color:#000">Dixième édition du ZEVENT !</div>';
+      document.body.append(pop);
+      setTimeout(() => {
+        pop.remove();
+        btn.disabled = false;
+      }, 20000);
+    }
+    if (afterFirst && PARAMS.has("sanction")) {
+      sim.extraShown = Date.now();
+      btn.disabled = true;
+      const box = document.createElement("div");
+      box.className = "mx-auto max-w-lg mb-4 p-4 rounded-xl border border-amber-500/40 bg-amber-500/10";
+      box.innerHTML = '<p class="font-semibold text-amber-200 mb-1">Sanction anti-triche active</p><p>Tes activités sont restreintes.</p>';
+      m.firstElementChild.prepend(box);
+    }
+    if (afterFirst && PARAMS.has("toast")) {
+      sim.extraShown = Date.now();
+      const toast = document.createElement("div");
+      toast.style.cssText = "position:fixed;right:20px;top:20px;z-index:60;padding:12px;background:#fff;color:#000";
+      toast.innerHTML = 'Nouveau succès débloqué ! <button id="toast-close" type="button">×</button>';
+      toast.querySelector("button").addEventListener("click", () => toast.remove());
+      document.body.append(toast);
+    }
     if (PARAMS.has("robot") && sim.continues === 1 && !sim.robotShown) {
       sim.robotShown = Date.now();
       const box = document.createElement("div");

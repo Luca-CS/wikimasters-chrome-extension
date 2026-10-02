@@ -76,6 +76,8 @@ window.pullsMain = (n, timer) =>
     main.querySelector("h3").textContent = t;
     main.querySelector("h3").nextElementSibling.textContent = d;
     badge.textContent = r;
+    badge.classList.toggle("shiny-badge", i === 2);
+    if (i === 2) badge.innerHTML = `${r}<span aria-hidden="true">✦</span><span class="sr-only"> shiny</span>`; // 3e carte shiny
     counter.textContent = String(i + 1);
     prev.disabled = i === 0;
     next.disabled = i === DECK.length - 1;

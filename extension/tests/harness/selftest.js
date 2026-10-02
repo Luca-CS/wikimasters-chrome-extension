@@ -1,5 +1,5 @@
 // Auto-test du service worker, copié dans une copie de l'extension (out/ext_selftest/pages/) :
-// relevé de paquets → alarmes et badge, passage en compte Pro, stock plein, boutons de test.
+// relevé de paquets → alarmes et badge, passage en compte Pro, stock plein, bouton de test.
 (async () => {
   const out = {};
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -19,8 +19,7 @@
     await chrome.storage.local.set({ packs: { count: 10, max: 10, at: Date.now(), nextMs: null } });
     await sleep(1500);
     out.full = { alarms: await alarms(), badge: await chrome.action.getBadgeText({}) };
-    out.testNotif = await chrome.runtime.sendMessage({ type: "testNotify", email: false });
-    out.testMail = await chrome.runtime.sendMessage({ type: "testNotify", email: true });
+    out.testNotif = await chrome.runtime.sendMessage({ type: "testNotify" });
   } catch (e) {
     out.error = String((e && e.stack) || e);
   }

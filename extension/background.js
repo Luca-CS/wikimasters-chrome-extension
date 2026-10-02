@@ -1,8 +1,7 @@
 // Service worker :
 // - ouvre le rapport ou la config à la demande du content script (pas d'accès à chrome.tabs là-bas) ;
 // - rappels de paquets : à partir du dernier relevé fait sur la page Paquets, affiche le nombre
-//   estimé de paquets sur l'icône et prévient (notification, e-mail via ntfy.sh) quand le stock est
-//   plein. Aucune action dans le jeu : c'est toi qui ouvres les paquets.
+//   estimé de paquets sur l'icône et envoie une notification quand le stock est plein.
 importScripts("lib/defaults.js", "lib/store.js", "lib/packs.js");
 
 const { store, packs } = WMT;
@@ -15,7 +14,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg) return;
   if (msg.type === "open") openPage(msg.page, msg.run, msg.hash, sender.tab);
   if (msg.type === "testNotify") {
-    testNotify(msg.email).then(reply, (e) => reply({ ok: false, error: e.message }));
+    testNotify().then(reply, (e) => reply({ ok: false, error: e.message }));
     return true; // réponse asynchrone
   }
 });
@@ -69,7 +68,7 @@ async function schedule() {
   if (!est) return chrome.alarms.clear("wmt-badge");
   await chrome.alarms.create("wmt-badge", { periodInMinutes: 1 });
   if (est.count >= est.max) return;
-  if (settings.notifyFull || settings.emailFull) await chrome.alarms.create("wmt-full", { when: est.fullAt });
+  if (settings.notifyFull) await chrome.alarms.create("wmt-full", { when: est.fullAt });
   if (settings.notifyEach && est.nextAt) await chrome.alarms.create("wmt-next", { when: est.nextAt });
 }
 
@@ -83,49 +82,13 @@ function notify(id, title, message) {
   });
 }
 
-/** Publie un message ntfy.sh avec copie par e-mail (compte ntfy.sh avec e-mail vérifié requis). */
-async function sendEmail(settings, title, message) {
-  if (!settings.ntfyToken || !settings.ntfyTopic) throw new Error("renseigne ton jeton ntfy et ton topic dans la config");
-  const r = await fetch("https://ntfy.sh/", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${settings.ntfyToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      topic: settings.ntfyTopic,
-      title,
-      message,
-      email: "yes", // adresse principale vérifiée du compte ntfy.sh
-      click: PULLS,
-      tags: ["package"],
-      priority: 4,
-    }),
-  });
-  if (!r.ok) {
-    let detail = `HTTP ${r.status}`;
-    try {
-      const body = await r.json();
-      detail = body.error || detail;
-    } catch {
-      /* réponse non JSON */
-    }
-    throw new Error(`ntfy.sh a refusé l'envoi (${detail})`);
-  }
-}
-
 async function onFull(settings, est) {
   // Une seule alerte par remplissage (le relevé change dès que tu ouvres un paquet).
   const key = String(est.fullAt);
   if ((await store.get("packsNotified")) === key) return;
   await store.set("packsNotified", key);
-  const title = "Tes paquets WikiMasters sont pleins";
   const message = `${est.max} / ${est.max} paquets disponibles (estimation) : ouvre-les pour ne pas perdre de temps de recharge.`;
-  if (settings.notifyFull) await notify("wmt-full", title, message);
-  if (settings.emailFull) {
-    try {
-      await sendEmail(settings, title, message);
-    } catch (e) {
-      await notify("wmt-error", "E-mail de rappel non envoyé", e.message);
-    }
-  }
+  if (settings.notifyFull) await notify("wmt-full", "Tes paquets WikiMasters sont pleins", message);
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -140,17 +103,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   await schedule(); // prochaine alarme (ou relance si l'alarme est arrivée un peu tôt)
 });
 
-async function testNotify(withEmail) {
-  const { settings } = await current();
+async function testNotify() {
   await notify("wmt-test", "Test WikiMasters Tagger", "Les notifications fonctionnent. Tu seras prévenu quand tes paquets seront pleins.");
-  if (withEmail) await sendEmail(settings, "Test WikiMasters Tagger", "L'e-mail de rappel fonctionne.");
   return { ok: true };
 }
 
 chrome.notifications.onClicked.addListener((id) => {
   if (!id.startsWith("wmt-")) return;
   chrome.notifications.clear(id);
-  if (id !== "wmt-error") chrome.tabs.create({ url: PULLS });
+  chrome.tabs.create({ url: PULLS });
 });
 
 chrome.storage.onChanged.addListener((ch, area) => {

@@ -2,7 +2,7 @@
 // - modes d'enchaînement : VRAIS clics souris / touches (Input.dispatch*), seuls à être « isTrusted » ;
 // - mode selftest : ouvre la page d'auto-test de l'extension chargée (alarmes, badge, notifications).
 // Usage : node cdp.mjs <port> <url> <mode>
-//   modes : page | normal | robot | takeover | move | alt | trustedonly | selftest
+//   modes : page | normal | robot | takeover | move | alt | toast | sanction | trustedonly | selftest
 //   (page : attend le résultat que le scénario de la page écrit dans <pre id="wmt-out">)
 // Écrit un objet JSON sur stdout (analysé par run.py).
 const [port, url, mode] = process.argv.slice(2);
@@ -87,6 +87,12 @@ try {
     Object.assign(out, JSON.parse(await ev(`document.getElementById("wmt-out").textContent`)));
   } else {
     await until(`!!document.getElementById("wmt-host") && !!window.WMT_openButton && !!WMT_openButton()`, 15000);
+    // Journal des messages du panneau (ceux qui s'effacent seraient sinon perdus).
+    await ev(`(() => { window.__panelLog = []; setInterval(() => {
+      const n = document.getElementById("wmt-host").shadowRoot.querySelector(".note");
+      const t = n && !n.hidden ? n.textContent : "";
+      if (t && __panelLog[__panelLog.length - 1] !== t) __panelLog.push(t);
+    }, 200); })()`);
     await sleep(600);
     await clickOn("WMT_openButton()"); // TON clic sur « Ouvrir »
     if (mode === "robot") {
@@ -114,9 +120,19 @@ try {
       }
       out.inputs = i;
       await sleep(1500);
+    } else if (mode === "toast") {
+      await until(`!!document.getElementById("toast-close")`, 60000);
+      await sleep(400);
+      await clickOn(`document.getElementById("toast-close")`); // tu fermes le toast
+      await until(done, 90000);
+      await sleep(1500);
+    } else if (mode === "sanction") {
+      await until(`!!__sim.extraShown`, 60000);
+      await sleep(8000);
     } else if (mode === "trustedonly") {
       await until(`__sim.continues >= 1 && __sim.ignored >= 1`, 60000);
-      await sleep(8000);
+      await until(`(window.__panelLog || []).some((t) => t.includes("clique sur « Ouvrir »"))`, 20000);
+      await sleep(500);
       out.afterFirst = { opens: await ev(`__sim.opens.length`), focused: await ev(`document.activeElement === WMT_openButton()`), panel: await panel() };
       await key("Enter", "Enter", 13); // tu appuies sur Entrée : clic humain sur « Ouvrir »
       await until(`__sim.opens.length >= 2`, 5000);
@@ -130,6 +146,7 @@ try {
     const cards = await ev(`__sim.cards`);
     out.cardDelaysMs = cards.slice(1).map((c, i) => (c.card === 1 ? null : `${cards[i].rarity}:${c.t - cards[i].t}`)).filter(Boolean);
     out.panel = await panel();
+    out.panelLog = await ev(`window.__panelLog`);
   }
 } catch (e) {
   out.error = String((e && e.stack) || e);

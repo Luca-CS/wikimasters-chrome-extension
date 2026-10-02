@@ -38,10 +38,20 @@
     return null;
   }
 
+  // Carte shiny (relevé du 02/10/2026) : le badge n'est pas une feuille,
+  // <div class="shiny-badge …">L<span>✦</span><span class="sr-only"> shiny</span></div>.
+  const SHINY = /^(L|UR|SR|R|PC|C) ?✦ ?shiny$/;
+  const ownText = (el) => clean([...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(""));
+  const isShinyBadge = (el) => el.classList.contains("shiny-badge") || SHINY.test(text(el));
+
   function rarityBadge(el) {
-    for (const e of el.querySelectorAll("div, span")) if (leaf(e) && RARITIES.has(text(e))) return e;
+    for (const e of el.querySelectorAll("div, span")) {
+      if (leaf(e) ? RARITIES.has(text(e)) : isShinyBadge(e) && RARITIES.has(ownText(e))) return e;
+    }
     return null;
   }
+
+  const rarityOf = (badge) => (!badge ? "" : leaf(badge) ? text(badge) : ownText(badge));
 
   /** Conteneur des cartes : le bloc qui entoure la grille et les deux barres de pagination. */
   function cardScope(doc = document) {
@@ -86,7 +96,7 @@
     const tags = [];
     const colors = {};
     for (const s of el.querySelectorAll("span")) {
-      if (!leaf(s)) continue;
+      if (!leaf(s) || (badge && badge.contains(s))) continue; // « ✦ » et « shiny » du badge
       const t = text(s);
       if (!t) continue;
       if (NUM.test(t)) {
@@ -103,7 +113,8 @@
     const img = [...el.querySelectorAll("img")].find((i) => i.alt && i.alt !== "WikiMasters" && /^https?:/.test(i.src));
     return {
       title: text(h3),
-      rarity: badge ? text(badge) : "",
+      rarity: rarityOf(badge),
+      shiny: !!badge && isShinyBadge(badge),
       desc: p ? text(p) : "",
       tags,
       attack: nums[0] || 0,
@@ -222,8 +233,30 @@
   const shown = (el) => (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
 
   /**
+   * Fenêtre du site posée par-dessus la page (le site les ajoute directement dans <body>) :
+   * position fixe, au moins la moitié de l'écran, qui capte les clics. Les effets décoratifs
+   * (gerbe de particules des cartes L : pointer-events none) ne comptent pas.
+   */
+  function overlay(doc = document) {
+    const win = doc.defaultView;
+    if (!doc.body || !win) return null;
+    const area = win.innerWidth * win.innerHeight;
+    for (const top of doc.body.children) {
+      if (top.id === "wmt-host" || /^(SCRIPT|STYLE|LINK|NEXT-ROUTE-ANNOUNCER)$/.test(top.tagName)) continue;
+      for (const el of [top, top.firstElementChild]) {
+        if (!el || el.getAttribute("aria-hidden") === "true") continue;
+        const cs = win.getComputedStyle(el);
+        if (cs.position !== "fixed" || cs.pointerEvents === "none" || cs.visibility === "hidden" || cs.display === "none") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width * r.height >= area / 2) return el;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Fenêtre bloquante affichée (dont la vérification « je ne suis pas un robot ») : l'extension
-   * n'y touche jamais, elle attend que tu t'en occupes.
+   * n'y touche jamais, elle attend que tu t'en occupes ou qu'elle disparaisse.
    */
   function blockingDialog(doc = document) {
     for (const el of doc.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')) {
@@ -232,7 +265,30 @@
     for (const el of doc.querySelectorAll("label, span, p, div, h2, h3")) {
       if (leaf(el) && /robot/i.test(text(el)) && shown(el)) return true;
     }
+    return !!overlay(doc);
+  }
+
+  /** Texte d'une fenêtre bloquante (journal de diagnostic). */
+  function blockingText(doc = document) {
+    const el = doc.querySelector('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]') || overlay(doc);
+    return el ? text(el).slice(0, 160) : "";
+  }
+
+  /** Sanction anti-triche affichée par la page Paquets (activités restreintes). */
+  function sanction(doc = document) {
+    for (const el of doc.querySelectorAll("p, div, span")) {
+      if (leaf(el) && /sanction anti-triche/i.test(text(el)) && shown(el)) return true;
+    }
     return false;
+  }
+
+  /** Message d'erreur affiché sous « Ouvrir » (encadré rouge du site), sinon "". */
+  function packError(doc = document) {
+    const scope = doc.querySelector("main") || doc.body;
+    for (const el of scope ? scope.querySelectorAll('div[class*="text-red"]') : []) {
+      if (leaf(el) && text(el) && shown(el)) return text(el);
+    }
+    return "";
   }
 
   /** Première phrase d'un extrait Wikipédia (celle qui définit le sujet). */
@@ -242,7 +298,8 @@
   }
 
   WMT.dom = {
-    clean, pager, cardElements, readCard, cards, activeFilters, hexColor,
-    packs, parseDuration, reveal, revealNav, isOpenButton, openButton, blockingDialog, firstSentence,
+    clean, isShinyBadge, pager, cardElements, readCard, cards, activeFilters, hexColor,
+    packs, parseDuration, reveal, revealNav, isOpenButton, openButton, overlay, blockingDialog, blockingText,
+    sanction, packError, firstSentence,
   };
 })(globalThis);

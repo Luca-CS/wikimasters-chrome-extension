@@ -52,8 +52,8 @@ reprises automatiquement du jeu dès qu'une étiquette apparaît sur une carte.
 
 ### Paquets : rappels et cartes tirées
 
-L'extension n'ouvre **jamais** de paquet et ne touche à rien sur la page Paquets :
-elle se contente de lire ce qui s'affiche.
+L'extension n'ouvre de paquet qu'après ton propre clic sur « Ouvrir » (voir
+l'enchaînement plus bas), et jamais au-delà du stock disponible à ce moment-là.
 
 - **Rappels.** Chaque fois que tu passes sur la page Paquets, l'extension relève
   ton compteur (« 7 / 10 paquets disponibles »). Elle en déduit quand ton stock
@@ -64,11 +64,6 @@ elle se contente de lire ce qui s'affiche.
   ouvres des paquets depuis un autre appareil, elle se recale à ta prochaine
   visite de la page Paquets dans ce navigateur. Chrome doit être ouvert pour
   recevoir les rappels.
-- **E-mail quand c'est plein**, via [ntfy.sh](https://ntfy.sh) (gratuit, 5
-  e-mails par jour au plus). Crée un compte, vérifie ton adresse dans Account,
-  crée un jeton d'accès, puis colle-le dans Config → Paquets et rappels, et
-  teste avec « Tester l'e-mail ». L'appli ntfy abonnée au topic affiché reçoit
-  aussi les rappels sur ton téléphone.
 - **Cartes tirées.** Pendant l'ouverture d'un paquet, chaque carte affichée est
   analysée. Le panneau récapitule les cartes du paquet avec leurs étiquettes
   suggérées, et la carte à l'écran est surlignée. Une carte n'est analysée
@@ -87,10 +82,18 @@ elle se contente de lire ce qui s'affiche.
   cliquer, et l'enchaînement reprend.
 - **Dans les deux cas**, si la vérification « je ne suis pas un robot »
   s'affiche, tout se met en pause sans y toucher et reprend une fois que tu
-  l'as validée. Tout se met aussi en pause si l'onglet n'est plus visible.
+  l'as validée. Pareil pour toute fenêtre du site (annonce, toast…), même si
+  elle grise le bouton « Ouvrir » un moment, et si l'onglet n'est plus visible.
+  Si une ouverture échoue avec un message d'erreur du site, l'extension
+  réessaie deux fois en laissant passer quelques secondes.
 - **Ce qui arrête tout** : un clic souris ou une touche du clavier ailleurs que
-  dans le panneau. Les mouvements du curseur et les touches seules comme Alt
-  (Alt+Tab), Ctrl ou Windows n'arrêtent rien.
+  dans le panneau. Fermer une fenêtre du site (clic dessus, Échap) ne compte
+  pas. Les mouvements du curseur et les touches seules comme Alt (Alt+Tab),
+  Ctrl ou Windows n'arrêtent rien. Une « sanction anti-triche » affichée par
+  le site arrête tout définitivement, sans réessayer.
+- **Étiquette Shiny.** Les cartes shiny (✦ à côté de la rareté) se voient
+  proposer l'étiquette « Shiny » en plus de leur catégorie, même si elles sont
+  déjà classées. Crée l'étiquette « Shiny » dans le jeu pour l'utiliser.
 
 Si le site change et que quelque chose ne marche plus, le lien **« Exporter la
 page »** du panneau enregistre le HTML de la page, sans tes identifiants. Il

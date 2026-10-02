@@ -34,7 +34,7 @@ Les scénarios dont une page manque sont sautés.
 | `pulls-reveal` | écran d'ouverture reconnu, suggestion sur la carte affichée, retour à 9/10 |
 | `pulls-auto-robot` | défilement des 5 cartes, pause sur la vérification « robot » (jamais cochée), « Continuer » |
 | `pulls-pingpong` | un autre onglet qui réécrit 10/10 en boucle ne déclenche aucune réécriture |
-| `chain-*` | enchaînement piloté avec de vrais clics et touches (`cdp.mjs`, protocole DevTools) : cas normal, bouton qui réagit à l'appui, bouton désactivé un instant, vérification « robot », reprise en main, mouvements du curseur, touche Alt, site qui n'accepte que les clics humains |
+| `chain-*` | enchaînement piloté avec de vrais clics et touches (`cdp.mjs`, protocole DevTools) : cas normal, bouton qui réagit à l'appui, bouton désactivé un instant, vérification « robot », reprise en main, annonce plein écran de 20 s (« Ouvrir » grisé), erreur réseau à l'ouverture, toast fermé par toi, sanction anti-triche, mouvements du curseur, touche Alt, site qui n'accepte que les clics humains |
 | `service-worker` | extension chargée pour de vrai : alarmes, badge, compte Pro, stock plein, notification de test |
 
 ## Fichiers

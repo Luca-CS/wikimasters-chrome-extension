@@ -118,6 +118,8 @@ SCENARIOS = [
         ("cartes surlignées", o.get("highlighted", 0) > 0),
         ("couleur Maths reprise du jeu", o.get("mathsColor") != "#000000"),
         ("surlignage retiré quand l'étiquette est posée", (o.get("afterTagging") or {}).get("stillHighlighted") is False),
+        ("carte shiny reconnue, Shiny seule suggérée", (o.get("shiny") or {}).get("detected") is True
+            and (o.get("shiny") or {}).get("flags") == ["Shiny"] and len((o.get("shiny") or {}).get("rarity") or "") <= 2),
         ("4 pages lues, 200 cartes, positions exactes", o.get("scanCards") == 200 and o.get("positionsOk") and o.get("clicks") == 4),
         ("catégorisation demandée", (o.get("msgs") or [{}])[0].get("page") == "report"),
     ]),
@@ -138,6 +140,8 @@ SCENARIOS = [
         ("pause pendant la vérification (carte 3)", o.get("robotPausedAt") == 3),
         ("vérification jamais touchée", o.get("robotClicked") is False),
         ("« Continuer » cliqué", o.get("continued") is True),
+        ("carte shiny : Shiny suggérée en plus de Royauté", any("Ptolémée II" in p and "Shiny" in p and "Royauté" in p
+                                                             for p in (o.get("end") or {}).get("pulled", []))),
     ]),
     ("pulls-pingpong", "page", "/pulls/?state=pingpong", None, lambda o: [
         ("aucune réécriture face à un autre onglet", (o.get("pingpong") or {}).get("extensionWrites") == 0),
@@ -152,6 +156,15 @@ SCENARIOS = [
     ("chain-takeover", "cdp", "/pulls/?state=chain", "takeover", lambda o: [
         ("arrêt quand tu cliques ailleurs", len(opens(o)) == 2 and "pris la main" in (o.get("noteJustAfter") or "")),
         ("message effacé tout seul", o.get("noteAfter10s") == ""),
+    ]),
+    ("chain-popup", "cdp", "/pulls/?state=chain&popup", "normal", lambda o: CHAIN_DONE(o) + [
+        ("pause affichée pendant l'annonce", any("Pause" in t for t in o.get("panelLog", []))),
+    ]),
+    ("chain-openerror", "cdp", "/pulls/?state=chain&openerror", "normal", CHAIN_DONE),
+    ("chain-toast", "cdp", "/pulls/?state=chain&toast", "toast", CHAIN_DONE),
+    ("chain-sanction", "cdp", "/pulls/?state=chain&sanction", "sanction", lambda o: [
+        ("aucune ouverture pendant la sanction", len(opens(o)) == 1),
+        ("arrêt expliqué", any("sanction" in t for t in o.get("panel", []))),
     ]),
     ("chain-move", "cdp", "/pulls/?state=chain", "move", lambda o: [("mouvements du curseur sans effet", len(opens(o)) == 3)]),
     ("chain-alt", "cdp", "/pulls/?state=chain", "alt", lambda o: [("touche Alt seule sans effet", len(opens(o)) == 3)]),

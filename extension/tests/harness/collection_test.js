@@ -42,6 +42,19 @@
     await sleep(500);
     out.afterTagging = { stillHighlighted: first.hasAttribute("data-wmt"), highlighted: document.querySelectorAll("[data-wmt]").length };
 
+    // Carte shiny déjà étiquetée : seule l'étiquette Shiny doit lui être suggérée.
+    const shinyRoot = first;
+    const badge = [...shinyRoot.querySelectorAll("div, span")].find((e) => e.childElementCount === 0 && /^(L|UR|SR|R|PC|C)$/.test(e.textContent.trim()));
+    badge.classList.add("shiny-badge");
+    badge.innerHTML = `${badge.textContent.trim()}<span aria-hidden="true">✦</span><span class="sr-only"> shiny</span>`;
+    await sleep(500);
+    const card = WMT.dom.cards(document).find((c) => c.root === shinyRoot);
+    out.shiny = {
+      detected: !!card && card.shiny,
+      rarity: card && card.rarity,
+      flags: [...shinyRoot.querySelectorAll(".wmt-chip")].map((c) => c.textContent),
+    };
+
     btn(/Lancer l'analyse/).click();
     out.scanOk = await until(() => window.__store.scanMeta);
     const cs = (window.__store.scan || {}).cards || [];
