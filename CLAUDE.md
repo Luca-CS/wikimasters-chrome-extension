@@ -9,7 +9,14 @@ Personal tool that suggests tags ("étiquettes") for cards in a WikiMasters coll
 - **Chrome extension** (`extension/`, the main tool): reads the Collection page DOM, pages through the collection by clicking « Suivant → », categorises the cards, highlights the cards to tag on the page, and shows a report.
 - **Python CLI** (`wmtag/`): parses text the user pastes from the Collection page into `input/*.txt` and writes reports to `output/`.
 
-Hard rule: the extension acts in the game only in the two ways the user explicitly asked for, and only when they start it. It never interacts with the site's « je ne suis pas un robot » check, never creates tags, and never touches « Défausser », trades or the market. Otherwise it only reads the page and clicks navigation buttons: the collection's pagination and, on the pack reveal screen, next card and « Continuer ».
+Hard rule: the extension acts in the game only in the three ways the user explicitly asked for, and only when they start it. It never interacts with the site's « je ne suis pas un robot » check, never creates tags, never touches trades or the market, and only clicks « Défausser » inside the sale described below.
+
+The sale (asked for on 05/10/2026) works like this:
+- **Start:** the user picks rarities with the panel's chips, clicks « Vendre les cartes sans étiquette… », then confirms once in the panel.
+- **Filters:** it sets the site filters to « Sans étiquette » plus those rarities.
+- **Loop:** on the current page it uses « Tout sélectionner (page) », deselects favourites and shiny cards (setting `sellKeep`, on by default), then clicks « Défausser (+N) » and the site's confirmation. Sold cards disappear and the next ones move up, so it sells the same page again. It moves to the next page only when a page holds nothing but kept cards, and it stops when nothing sellable is left on any remaining page.
+- **Safeguards:** before each sale every card on screen is checked to be untagged and of a chosen rarity, and the confirmation's count must equal the number of cards to sell; otherwise nothing is sold and the run stops.
+- **End:** the filters are restored afterwards. Otherwise it only reads the page and clicks navigation buttons: the collection's pagination and, on the pack reveal screen, next card and « Continuer ».
 
 Auto-tagging (asked for on 02/10/2026) is started by the panel's « Étiqueter toute la collection » button. It runs through every page without asking for confirmation and applies every suggested tag (all matches, not only the top one). It applies only tags that already exist in the game, which are read from the « Appliquer une étiquette » dialog; missing ones such as « Shiny » are skipped and listed in the summary.
 
@@ -30,7 +37,7 @@ The code is hosted on GitHub at `Luca-CS/wikimasters-chrome-extension`, a privat
 
 ```
 python -m unittest -v              # all tests, including the JS/Python parity test (needs node)
-python extension/tests/harness/run.py [filter]   # browser harness: 20 scenarios (~12 min) in headless Edge/Chrome (see its README); set PYTHONUTF8=1 on Windows
+python extension/tests/harness/run.py [filter]   # browser harness: 21 scenarios (~13 min) in headless Edge/Chrome (see its README); set PYTHONUTF8=1 on Windows
 python -m unittest tests.test_wmtag.TestClassify.test_rules   # single test
 python extension/build_defaults.py # regenerate extension/lib/defaults.js from rules/themes/config.toml
 node --check extension/content/content.js                     # quick syntax check of a JS file
@@ -66,6 +73,10 @@ Classic scripts attach to a global `WMT` namespace, with no ES modules, so the s
     - **Stopping.** Any trusted click or key outside the panel stops it (`stopTagging`). `unmount` aborts it too.
     - **Selection markup**, seen live on 02/10/2026: the bar and the dialog are body-level portals, and the dialog has no role.
     - **Harness.** Covered by the `collection-autotag` scenario, whose `collection_setup.js` simulates selection mode, the bar (with a « Défausser » trap) and the dialog, with only 7 of the 9 tags existing.
+  - **Sale** (`runSell`, `sellPage`)
+    - **Site markup** (`dom.js`, seen live on 05/10/2026): the tag filter is `button[aria-label="Filtrer par étiquette"]`, which opens a body-level `ul[role=listbox]` of `button[role=option]`. Rarity chips are `main` buttons, `opacity-50` when off and `ring-2` when on. The confirmation is a body-level portal, h3 « Défausser N cartes ? », with « Annuler » and « Défausser »; after it the site shows « N cartes défaussées (+N wikibidous). », empties the selection and reloads. A favourite has a `button[aria-label="Retirer des favoris"]`, which is hidden in selection mode, so favourites are read before entering it.
+    - **Cleanup.** `leaveSelection()` cancels an open confirmation, and never confirms it.
+    - **Harness.** The `collection-sell` scenario covers it. `collection_setup.js` keeps an inventory where filters and sales apply, and hides the pager at one page, like the site. Every 5th card becomes an R that must survive a sale of SR, and favourites and the shiny card must be kept.
   - **Highlighting:** live classification of the visible cards, memoised, through a `MutationObserver` that ignores the extension's own nodes. Highlights use `data-wmt*` attributes plus an appended `.wmt-flags` node, never `className`, because React re-renders would wipe classes. In-game tag colours are synced into `config.rules[].color` unless `colorLocked`.
 - **Packs page (`/pulls`):**
   - **Counter.** `dom.packs()` reads the counter box `div.card-frame`: « 7 / 10 », « paquets disponibles », and below 10 « Prochain dans <span class="font-mono">1:43</span> ». `parseDuration` reads the `m:ss` timer, and also « N min N s » as a fallback.

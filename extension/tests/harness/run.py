@@ -140,6 +140,14 @@ SCENARIOS = [
             and "Sautées" in (o.get("note") or "")),
         ("« Défausser » jamais touché, mode sélection quitté", o.get("discarded") == 0 and o.get("selectionLeft") is True),
     ]),
+    ("collection-sell", "page", "/collection/?sell", None, lambda o: [
+        ("raretés choisies dans le panneau", o.get("chipsOn") == ["SR"]),
+        ("vente terminée", o.get("finished") is True),
+        ("exactement les SR sans étiquette vendus (pas les R), sur toutes les pages", (o.get("counts") or [0])[0] > 0
+            and o.get("missing") == [] and o.get("extra") == [] and len(o.get("rounds", [])) >= 2),
+        ("favoris et shiny gardés", (o.get("protectedCount") or 0) > 0 and "gardée" in (o.get("note") or "")),
+        ("filtres remis à zéro, mode sélection quitté", o.get("filtersReset") is True and o.get("clean") is True),
+    ]),
     ("pulls-full", "page", "/pulls/?state=full", None, lambda o: [
         ("compteur 10/10 lu", o.get("dom", {}).get("packs") == {"count": 10, "max": 10, "nextMs": None}),
         ("relevé enregistré", (o.get("first", {}).get("stored") or {}).get("count") == 10),

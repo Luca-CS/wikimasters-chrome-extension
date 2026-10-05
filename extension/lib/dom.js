@@ -195,6 +195,65 @@
     return null;
   }
 
+  // --- Filtres et défausse (vente contre des wikibidous), relevés le 05/10/2026 -----
+  // Filtre d'étiquette : bouton [aria-label="Filtrer par étiquette"] qui ouvre une liste
+  // <ul role="listbox"> (dans <body>) de <button role="option"> (« Sans étiquette »…).
+  // Rareté : boutons L…C dans <main>, « opacity-50 » quand non choisis (aucun choisi = toutes).
+  // « Défausser (+N) » ouvre une confirmation (dans <body>) : h3 « Défausser N cartes ? »,
+  // « Annuler » et « Défausser ». Ensuite : message « N cartes défaussées (+N wikibidous). »,
+  // sélection vidée, liste rechargée (les cartes suivantes remontent sur la même page).
+
+  const tagFilterButton = (doc = document) => doc.querySelector('button[aria-label="Filtrer par étiquette"]');
+
+  /** Options de la liste du filtre d'étiquette ouverte : libellé -> bouton. */
+  function tagFilterOptions(doc = document) {
+    const out = new Map();
+    for (const o of doc.querySelectorAll('[role="listbox"] [role="option"]')) out.set(text(o), o);
+    return out;
+  }
+
+  /** Puces de rareté du filtre : rareté -> {button, on}. */
+  function rarityChips(doc = document) {
+    const out = new Map();
+    for (const b of (doc.querySelector("main") || doc).querySelectorAll("button")) {
+      if (RARITIES.has(text(b))) out.set(text(b), { button: b, on: !/opacity-50/.test(b.className) });
+    }
+    return out;
+  }
+
+  /** Carte en favori (étoile « Retirer des favoris », masquée en mode sélection). */
+  const isStarred = (card) => !!card.root.querySelector('button[aria-label="Retirer des favoris"]');
+  /** Carte engagée dans un échange (non sélectionnable). */
+  const pendingTrade = (card) => /Échange en attente/.test(text(card.root));
+
+  const barButton = (bar, re) => (bar ? buttonByText(bar.el, re) : null);
+
+  /** Confirmation de défausse : {el, count, confirm, cancel}, ou null. */
+  function discardDialog(doc = document) {
+    for (const top of doc.body ? doc.body.children : []) {
+      const h3 = top.querySelector("h3");
+      const m = h3 && text(h3).match(/^Défausser (\d+) cartes? \?$/);
+      if (!m) continue;
+      return { el: top, count: +m[1], confirm: buttonByText(top, /^Défausser$/), cancel: buttonByText(top, /^Annuler$/),
+        error: [...top.querySelectorAll("p")].map(text).find((t) => /erreur/i.test(t)) || "" };
+    }
+    return null;
+  }
+
+  /** Message « N cartes défaussées (+N wikibidous). » affiché après une défausse : N, sinon null. */
+  function discardedMessage(doc = document) {
+    for (const el of (doc.querySelector("main") || doc).querySelectorAll("span, p, div")) {
+      if (!leaf(el)) continue;
+      const m = text(el).match(/^(\d+) cartes? défaussées?/);
+      if (m) return +m[1];
+    }
+    return null;
+  }
+
+  /** « Aucune carte trouvée avec ces filtres. » */
+  const emptyResult = (doc = document) =>
+    [...(doc.querySelector("main") || doc).querySelectorAll("p")].some((p) => /^Aucune carte/.test(text(p)));
+
   // --- Page Paquets (/pulls), relevée le 01/10/2026 ---------------------------------
   // <div class="card-frame ..."><div><span>7</span><span> / 10</span></div><div>paquets disponibles</div>
   //   <div>Prochain dans <span class="font-mono">1:43</span></div></div>
@@ -353,6 +412,7 @@
   WMT.dom = {
     clean, isShinyBadge, pager, cardElements, readCard, cards, activeFilters, hexColor,
     selectButton, quitSelectionButton, selectionBar, tagModal,
+    tagFilterButton, tagFilterOptions, rarityChips, isStarred, pendingTrade, barButton, discardDialog, discardedMessage, emptyResult,
     packs, parseDuration, reveal, revealNav, isOpenButton, openButton, overlay, blockingDialog, blockingText,
     sanction, packError, firstSentence,
   };

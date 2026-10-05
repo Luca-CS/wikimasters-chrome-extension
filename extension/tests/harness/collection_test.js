@@ -21,7 +21,43 @@
   try {
     out.mounted = await until(() => shadow(), 10000);
     await sleep(800);
-    if (location.search.includes("autotag")) {
+    if (location.search.includes("sell")) {
+      // Vente des SR sans étiquette (les R restent), favoris et shiny gardés, sur toutes les pages.
+      const tagsOfRoot = (root) => [...root.querySelectorAll("span.rounded-full")].map((s) => s.textContent.trim());
+      const tpl = [...document.querySelectorAll("div.relative.isolate.group")];
+      const byBase = new Map(tpl.map((r) => [r.querySelector("h3").textContent.trim(), r]));
+      const base = (t) => t.replace(/ ·\d$/, "");
+      const protectedTitle = (t) => {
+        const r = byBase.get(base(t));
+        // La 1re carte est rendue shiny par le simulateur (sur sa copie, pas sur cette page).
+        return !!r.querySelector('button[aria-label="Retirer des favoris"]') || r === tpl[0];
+      };
+      const eligible = window.__inventory.filter((it) => it.rarity === "SR" && !tagsOfRoot(byBase.get(base(it.title))).length);
+      out.expected = eligible.filter((it) => !protectedTitle(it.title)).map((it) => it.title).sort();
+      out.protectedCount = eligible.length - out.expected.length;
+      const chip = (r) => [...shadow().querySelectorAll(".rchip")].find((c) => c.textContent === r);
+      chip("SR").click();
+      await sleep(400);
+      out.chipsOn = [...shadow().querySelectorAll(".rchip.on")].map((c) => c.textContent);
+      btn(/^Vendre les cartes sans étiquette/).click();
+      await sleep(300);
+      btn(/^Oui, vendre ces cartes$/).click();
+      out.finished = await until(() => {
+        const stop = btn(/Arrêter la vente/);
+        const note = shadow().querySelector(".note");
+        return stop && stop.hidden && note && !note.hidden && /vendue/.test(note.textContent);
+      }, 140000);
+      out.note = shadow().querySelector(".note").textContent;
+      out.sold = window.__sold.flatMap((s) => s.titles).sort();
+      out.missing = out.expected.filter((t) => !out.sold.includes(t));
+      out.extra = out.sold.filter((t) => !out.expected.includes(t));
+      out.counts = [out.expected.length, out.sold.length];
+      delete out.expected;
+      delete out.sold;
+      out.rounds = window.__sold.map((s) => `p${s.page}:${s.titles.length}`);
+      out.filtersReset = !window.__filters.untagged && window.__filters.rarities.size === 0;
+      out.clean = !!WMT.dom.selectButton() && !WMT.dom.selectionBar() && !WMT.dom.discardDialog();
+    } else if (location.search.includes("autotag")) {
       // Étiquetage automatique des 4 pages, puis vérification page par page.
       const t0 = Date.now();
       btn(/Étiqueter toute la collection/).click();

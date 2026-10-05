@@ -464,6 +464,7 @@
   document.addEventListener("pointerdown", (e) => {
     if (!e.isTrusted || fromPanel(e)) return;
     if (tagging) return stopTagging();
+    if (selling) return stopSelling();
     if (onOpenButton(e.target)) {
       stopAll();
       return startChain();
@@ -475,6 +476,7 @@
   document.addEventListener("keydown", (e) => {
     if (!e.isTrusted || SILENT_KEYS.test(e.key) || fromPanel(e)) return;
     if (tagging) return stopTagging();
+    if (selling) return stopSelling();
     if ((e.key === "Enter" || e.key === " ") && onOpenButton(document.activeElement)) {
       stopAll();
       return startChain();
@@ -620,7 +622,7 @@
   }
 
   async function runScan(ignoreFilters = false) {
-    if (scanning || tagging || route !== "collection") return;
+    if (scanning || tagging || selling || route !== "collection") return;
     const filters = dom.activeFilters();
     if (filters.length && !ignoreFilters) {
       setOpen(true);
@@ -715,6 +717,11 @@
   /** Ferme la fenêtre d'étiquetage et quitte le mode sélection (aussi après un arrêt). */
   async function leaveSelection() {
     const job = { abort: false };
+    const dialog = dom.discardDialog();
+    if (dialog && dialog.cancel) {
+      dialog.cancel.click(); // jamais « Défausser » ici : on annule
+      await waitFor(job, () => !dom.discardDialog(), 3000);
+    }
     const modal = dom.tagModal();
     if (modal) {
       (modal.done || modal.close)?.click();
@@ -818,7 +825,7 @@
   }
 
   async function runAutoTag(ignoreFilters = false) {
-    if (scanning || tagging || route !== "collection") return;
+    if (scanning || tagging || selling || route !== "collection") return;
     const filters = dom.activeFilters();
     if (filters.length && !ignoreFilters) {
       setOpen(true);
@@ -855,6 +862,183 @@
     } finally {
       await leaveSelection();
       tagging = null;
+      if (ui) {
+        ui.progress.hidden = true;
+        renderPanel();
+      }
+      refresh();
+    }
+  }
+
+  // --- Vente (défausse) des cartes sans étiquette -----------------------------------
+  // Filtres du site « Sans étiquette » + raretés choisies dans le panneau, puis tant qu'il
+  // reste des cartes : page sélectionnée avec « Tout sélectionner (page) », favoris et cartes
+  // shiny désélectionnés (si « Garder »), « Défausser (+N) », confirmation du site après
+  // vérification du nombre. Les cartes vendues disparaissent : les suivantes remontent sur la
+  // même page. Avant chaque vente, chaque carte affichée est vérifiée (sans étiquette, bonne
+  // rareté) : au moindre écart, rien n'est vendu et tout s'arrête.
+
+  let selling = null; // {abort}
+  const RARITY_ORDER = ["L", "UR", "SR", "R", "PC", "C"];
+
+  async function setTagFilter(job, label) {
+    const b = dom.tagFilterButton();
+    if (!b) throw new Error("filtre d'étiquette introuvable.");
+    if (dom.clean(b.textContent) === label) return;
+    b.click();
+    await until(job, () => dom.tagFilterOptions().has(label), 5000, `option « ${label} » introuvable dans le filtre d'étiquette.`);
+    await step(job);
+    dom.tagFilterOptions().get(label).click();
+    await until(job, () => dom.clean(dom.tagFilterButton().textContent) === label, 5000, `le filtre « ${label} » ne s'est pas appliqué.`);
+  }
+
+  async function setRarityFilter(job, wanted) {
+    for (const [r, chip] of dom.rarityChips()) {
+      if (chip.on === wanted.has(r)) continue;
+      chip.button.click();
+      await step(job, 250);
+    }
+    await until(job, () => [...dom.rarityChips()].every(([r, c]) => c.on === wanted.has(r)), 5000, "le filtre de rareté ne s'est pas appliqué.");
+  }
+
+  /** Attend que la liste ne bouge plus (rechargement après un filtre ou une vente). */
+  async function settle(job) {
+    let last = null;
+    let since = Date.now();
+    await until(job, () => {
+      const bar = dom.selectionBar();
+      const s = `${signature()}|${dom.emptyResult()}|${bar && bar.refreshing}`;
+      if (s !== last) {
+        last = s;
+        since = Date.now();
+      }
+      return !(bar && bar.refreshing) && Date.now() - since > 900;
+    }, 20000, "la collection ne s'est pas rechargée.");
+  }
+
+  async function sellPage(job, sell, kept, stats) {
+    await enterSelection(job);
+    const first = findCard(sell[0]);
+    if (!first) throw new Error("carte introuvable après le passage en mode sélection.");
+    first.h3.click();
+    await until(job, () => !!dom.selectionBar(), 5000, "barre de sélection introuvable.");
+    await step(job);
+    const all = dom.barButton(dom.selectionBar(), /^Tout sélectionner/);
+    if (all) {
+      all.click();
+      await step(job, 300);
+    }
+    for (const c of kept) {
+      if (dom.pendingTrade(c)) continue; // déjà exclue par le site
+      const cur = findCard(c);
+      if (cur) {
+        cur.h3.click();
+        await step(job);
+      }
+    }
+    await until(job, () => {
+      const bar = dom.selectionBar();
+      return bar && !bar.refreshing && bar.count === sell.length;
+    }, 5000, `sélection incohérente (${(dom.selectionBar() || {}).count} cartes au lieu de ${sell.length}) : rien n'a été vendu.`);
+    const discard = dom.barButton(dom.selectionBar(), /^Défausser \(\+\d+\)$/);
+    if (!discard || discard.disabled) throw new Error("bouton « Défausser » introuvable.");
+    discard.click();
+    await until(job, () => !!dom.discardDialog(), 5000, "confirmation de défausse introuvable.");
+    const dialog = dom.discardDialog();
+    if (dialog.count !== sell.length || !dialog.confirm) {
+      if (dialog.cancel) dialog.cancel.click();
+      throw new Error(`le site propose de défausser ${dialog.count} cartes au lieu de ${sell.length} : annulé.`);
+    }
+    await step(job, 300);
+    if (job.abort) throw new Aborted(); // dernier moment pour s'arrêter avant la vente
+    dialog.confirm.click();
+    await until(job, () => !dom.discardDialog() || !!dom.discardDialog().error, 20000, "pas de réponse du site après « Défausser ».");
+    const refused = dom.discardDialog();
+    if (refused) {
+      if (refused.cancel) refused.cancel.click();
+      throw new Error(`le site a refusé la défausse : ${refused.error}`);
+    }
+    stats.sold += sell.length;
+    log(`${plural(sell.length, "carte")} vendue${sell.length > 1 ? "s" : ""} :`, sell.map((c) => c.title).join(", "));
+    await leaveSelection();
+  }
+
+  function sellSummary(stats) {
+    return `${plural(stats.sold, "carte")} vendue${stats.sold > 1 ? "s" : ""} (+${stats.sold} wikibidou${stats.sold > 1 ? "s" : ""})` +
+      (stats.kept.size ? `, ${plural(stats.kept.size, "carte")} gardée${stats.kept.size > 1 ? "s" : ""} (favoris, shiny ou échange en cours).` : ".");
+  }
+
+  function askSell() {
+    const rarities = RARITY_ORDER.filter((r) => (config.settings.sellRarities || []).includes(r));
+    if (!rarities.length) return note("Choisis d'abord au moins une rareté.", "warn", null, 6000);
+    note(`Vendre toutes tes cartes sans étiquette de rareté ${rarities.join(", ")} ? Irréversible : chaque carte est retirée ` +
+      `contre 1 wikibidou.${config.settings.sellKeep !== false ? " Favoris et cartes shiny gardés." : ""}`, "err",
+    { label: "Oui, vendre ces cartes", onclick: () => runSell() });
+  }
+
+  function stopSelling() {
+    if (!selling || selling.abort) return;
+    selling.abort = true;
+    log("vente arrêtée : tu as pris la main");
+  }
+
+  async function runSell() {
+    if (scanning || tagging || selling || route !== "collection") return;
+    const rarities = new Set(config.settings.sellRarities || []);
+    if (!rarities.size) return askSell();
+    const keep = config.settings.sellKeep !== false;
+    const job = (selling = { abort: false });
+    const stats = { sold: 0, kept: new Set() };
+    note(null);
+    renderPanel();
+    ui.progress.hidden = false;
+    ui.bar.style.width = "0%";
+    try {
+      await leaveSelection();
+      await setTagFilter(job, "Sans étiquette");
+      await setRarityFilter(job, rarities);
+      await settle(job);
+      let p;
+      while ((p = dom.pager()) && p.page > 1) await turnPage(job, p.prev, p.page - 1);
+      for (let round = 0; round < 1000; round++) {
+        await settle(job);
+        const cards = dom.cards(document, knownTags());
+        if (!cards.length || dom.emptyResult()) break;
+        const wrong = cards.find((c) => c.tags.length || !rarities.has(c.rarity));
+        if (wrong) {
+          throw new Error(`filtre non appliqué : « ${wrong.title} » ${wrong.tags.length ? "a une étiquette" : `est ${wrong.rarity}`}. Rien n'a été vendu sur cette page.`);
+        }
+        const kept = cards.filter((c) => (keep && (dom.isStarred(c) || c.shiny)) || dom.pendingTrade(c));
+        kept.forEach((c) => stats.kept.add(c.title));
+        const sell = cards.filter((c) => !kept.includes(c));
+        p = dom.pager();
+        ui.ptext.textContent = `${p ? `Page ${p.page} / ${p.total} · ` : ""}${plural(stats.sold, "carte")} vendue${stats.sold > 1 ? "s" : ""}`;
+        if (!sell.length) {
+          if (p && p.page < p.total) {
+            await turnPage(job, p.next, p.page + 1);
+            continue;
+          }
+          break;
+        }
+        await sellPage(job, sell, kept, stats);
+      }
+      log("vente terminée :", sellSummary(stats));
+      note(`✓ ${sellSummary(stats)}`, "ok");
+    } catch (e) {
+      log("vente interrompue :", e && e.message);
+      if (e instanceof Aborted) note(`Vente arrêtée. ${sellSummary(stats)}`, "warn");
+      else note(`Vente interrompue : ${e.message} ${sellSummary(stats)}`, "err");
+    } finally {
+      await leaveSelection();
+      // Filtres du site remis comme avant (toutes les étiquettes, toutes les raretés).
+      const reset = { abort: false };
+      try {
+        await setTagFilter(reset, "Toutes les étiquettes");
+        await setRarityFilter(reset, new Set());
+      } catch (e) {
+        log("filtres non remis à zéro :", e.message);
+      }
+      selling = null;
       if (ui) {
         ui.progress.hidden = true;
         renderPanel();
@@ -988,6 +1172,20 @@
             ref("tagBtn", h("button", { class: "btn accent", onclick: () => runAutoTag() }, "Étiqueter toute la collection")),
             ref("tagStop", h("button", { class: "btn", hidden: true, onclick: stopTagging }, "Arrêter l'étiquetage"))),
           h("section", {},
+            h("h4", {}, "Vendre les cartes sans étiquette"),
+            h("p", { class: "muted small" },
+              "Défausse, contre 1 wikibidou chacune, toutes tes cartes sans étiquette des raretés choisies, page par page. Irréversible."),
+            ref("sellChips", h("div", { class: "rchips" }, RARITY_ORDER.map((r) => {
+              const chip = h("button", { class: "rchip", "data-r": r, title: `Vendre les ${r} sans étiquette`, onclick: () => toggleSellRarity(r) }, r);
+              chip.style.setProperty("--r", `var(--color-rarity-${r.toLowerCase()}, #b8f2d5)`);
+              return chip;
+            }))),
+            h("label", { class: "toggle" },
+              h("span", {}, "Garder les favoris et les cartes shiny"),
+              ref("sellKeep", h("input", { type: "checkbox", class: "switch", onchange: (e) => setSetting("sellKeep", e.target.checked) }))),
+            ref("sellBtn", h("button", { class: "btn danger", onclick: askSell }, "Vendre les cartes sans étiquette…")),
+            ref("sellStop", h("button", { class: "btn", hidden: true, onclick: stopSelling }, "Arrêter la vente"))),
+          h("section", {},
             h("h4", {}, "Catégorisation"),
             h("label", { class: "toggle" },
               h("span", {}, "Enrichir avec Wikidata"),
@@ -1066,6 +1264,13 @@
     await safe(() => store.saveConfig(config));
   }
 
+  function toggleSellRarity(r) {
+    const cur = new Set(config.settings.sellRarities || []);
+    cur.has(r) ? cur.delete(r) : cur.add(r);
+    note(null);
+    setSetting("sellRarities", RARITY_ORDER.filter((x) => cur.has(x)));
+  }
+
   const openPage = (page, run = false, hash = "") => safe(() => chrome.runtime.sendMessage({ type: "open", page, run, hash }));
 
   function renderPanel() {
@@ -1085,10 +1290,17 @@
     ui.scanInfo.textContent = scanMeta
       ? `Dernière analyse : ${fmtDate(scanMeta.at)} · ${plural(scanMeta.n, "carte")} · ${scanMeta.pages} pages`
       : "Pas encore analysée.";
-    ui.scanBtn.hidden = !!(scanning || tagging);
+    const busy = !!(scanning || tagging || selling);
+    ui.scanBtn.hidden = busy;
     ui.stopBtn.hidden = !scanning;
-    ui.tagBtn.hidden = !!(scanning || tagging);
+    ui.tagBtn.hidden = busy;
     ui.tagStop.hidden = !tagging;
+    const chosen = new Set(s.sellRarities || []);
+    for (const chip of ui.sellChips.children) chip.classList.toggle("on", chosen.has(chip.dataset.r));
+    ui.sellKeep.checked = s.sellKeep !== false;
+    ui.sellBtn.hidden = busy;
+    ui.sellBtn.disabled = !chosen.size;
+    ui.sellStop.hidden = !selling;
     ui.catBtn.disabled = !scanMeta || !!scanning;
     ui.catBtn.className = scanMeta && !scanning ? "btn accent" : "btn";
   }
@@ -1140,6 +1352,7 @@
     clearInterval(packsTimer);
     if (scanning) scanning.abort = true;
     if (tagging) tagging.abort = true;
+    if (selling) selling.abort = true;
     stopAll();
     clearHighlights();
     if (ui) ui.host.remove();
@@ -1255,6 +1468,15 @@
     .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
     .btn.accent { border-color: var(--accent); color: var(--accent); }
     .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn.danger { border-color: rgba(255,101,104,.55); color: #ff6568; }
+    .rchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .rchip {
+      padding: 4px 12px; border: 0; border-radius: 999px; cursor: pointer;
+      background: color-mix(in srgb, var(--r) 19%, transparent); color: var(--r);
+      font: 600 12px/1.3 var(--heading); opacity: .5; transition: opacity .15s, box-shadow .15s;
+    }
+    .rchip:hover { opacity: .8; }
+    .rchip.on { opacity: 1; box-shadow: 0 0 0 2px rgba(255,255,255,.3); }
     .row { display: flex; gap: 8px; }
     .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; cursor: pointer; }
     .switch {

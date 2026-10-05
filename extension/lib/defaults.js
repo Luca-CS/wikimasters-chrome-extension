@@ -738,7 +738,9 @@
       "autoReveal": true,
       "revealDelay": 200,
       "naturalRhythm": true,
-      "autoChain": true
+      "autoChain": true,
+      "sellRarities": [],
+      "sellKeep": true
     }
   };
   WMT.defaults = { config: () => JSON.parse(JSON.stringify(DEFAULTS)) };

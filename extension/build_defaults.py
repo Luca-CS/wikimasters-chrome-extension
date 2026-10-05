@@ -60,6 +60,10 @@ def main():
             "naturalRhythm": True,  # légères variations corrélées du délai (lib/rhythm.js)
             # Après TON clic sur « Ouvrir », rouvre les paquets disponibles à ce moment-là.
             "autoChain": True,
+            # Vente (défausse) des cartes sans étiquette : raretés choisies dans le panneau,
+            # favoris et cartes shiny gardés.
+            "sellRarities": [],
+            "sellKeep": True,
         },
     }
     body = json.dumps(config, ensure_ascii=False, indent=2).replace("\n", "\n  ")

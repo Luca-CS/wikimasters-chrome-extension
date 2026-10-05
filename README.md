@@ -51,6 +51,16 @@ recharge la page WikiMasters.
    ou une touche ailleurs que dans le panneau arrête tout. Garde l'onglet
    visible : Chrome ralentit fortement les onglets en arrière-plan.
 
+5. **Vente des cartes sans étiquette** : choisis une ou plusieurs raretés avec
+   les puces du panneau, clique sur « Vendre les cartes sans étiquette… » puis
+   confirme. L'extension règle les filtres du site (« Sans étiquette » + ces
+   raretés), puis sélectionne chaque page avec « Tout sélectionner (page) » et
+   la défausse (1 wikibidou par carte), jusqu'à la dernière page. C'est
+   **irréversible**. Les favoris et les cartes shiny sont gardés (réglable), et
+   avant chaque vente elle vérifie que chaque carte affichée est bien sans
+   étiquette et de la bonne rareté, sinon elle s'arrête sans rien vendre. Les
+   filtres sont remis à zéro à la fin.
+
 La page **Config** (lien du panneau ou clic droit sur l'icône → Options)
 rassemble les étiquettes, leurs mots-clés et couleurs, les thèmes candidats, les
 réglages (Wikidata, pause entre les pages, style du surlignage…) et un testeur de
