@@ -7,8 +7,8 @@ Propose des étiquettes pour ta collection WikiMasters. Deux façons de l'utilis
 - **le script Python**, à partir du texte que tu copies toi-même depuis la page
   Collection.
 
-Dans les deux cas, **poser les étiquettes dans le jeu reste manuel** : rien n'est
-jamais étiqueté automatiquement.
+Avec l'extension, tu peux aussi faire poser les étiquettes suggérées dans le jeu
+(« Étiqueter toute la collection »), uniquement quand tu le lances.
 
 ## Extension Chrome
 
@@ -40,6 +40,16 @@ recharge la page WikiMasters.
    étiquette dans le panneau pour ne surligner qu'elle (pratique avec le bouton
    « Sélectionner » du jeu). Le surlignage disparaît dès que tu as posé
    l'étiquette.
+
+4. **Étiquetage automatique** : le bouton « Étiqueter toute la collection » du
+   panneau pose dans le jeu toutes les étiquettes suggérées, page par page, sans
+   demander de confirmation. Il passe en mode « Sélectionner », coche les cartes
+   d'une étiquette, clique sur « Étiqueter » puis sur l'étiquette, et recommence
+   pour la suivante. Seules les étiquettes qui existent déjà dans le jeu sont
+   posées : les autres (par exemple « Shiny » tant que tu ne l'as pas créée)
+   sont sautées et listées à la fin. « Défausser » n'est jamais touché. Un clic
+   ou une touche ailleurs que dans le panneau arrête tout. Garde l'onglet
+   visible : Chrome ralentit fortement les onglets en arrière-plan.
 
 La page **Config** (lien du panneau ou clic droit sur l'icône → Options)
 rassemble les étiquettes, leurs mots-clés et couleurs, les thèmes candidats, les

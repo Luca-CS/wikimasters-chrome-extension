@@ -21,6 +21,35 @@
   try {
     out.mounted = await until(() => shadow(), 10000);
     await sleep(800);
+    if (location.search.includes("autotag")) {
+      // Étiquetage automatique des 4 pages, puis vérification page par page.
+      const t0 = Date.now();
+      btn(/Étiqueter toute la collection/).click();
+      await until(() => !shadow().querySelector(".progress, [hidden]") || true, 100);
+      out.finished = await until(() => {
+        const stop = btn(/Arrêter l'étiquetage/);
+        const note = shadow().querySelector(".note");
+        return stop && stop.hidden && note && !note.hidden && /posée/.test(note.textContent);
+      }, 140000);
+      out.seconds = Math.round((Date.now() - t0) / 1000);
+      out.note = shadow().querySelector(".note").textContent;
+      out.applied = window.__applied.map((a) => `${a.page}:${a.tag}:${a.titles.length}`);
+      out.discarded = window.__discarded;
+      out.selectionLeft = !!WMT.dom.selectButton() && !WMT.dom.selectionBar() && !WMT.dom.tagModal();
+      const rules = WMT.core.compileRules(window.__store.config.rules);
+      const known = new Set(window.__store.config.rules.map((r) => r.name));
+      out.remaining = [];
+      out.pages = [];
+      for (const p of [1, 2, 3, 4]) {
+        window.__showPage(p);
+        await sleep(300);
+        const cards = WMT.dom.cards(document, known);
+        out.pages.push(cards.length);
+        for (const c of cards) {
+          for (const m of WMT.core.suggest(c, rules)) if (window.__gameTags.includes(m.tag)) out.remaining.push(`${p}:${c.title}:${m.tag}`);
+        }
+      }
+    } else {
     out.promptVisible = !shadow().querySelector(".prompt").hidden;
     out.highlighted = document.querySelectorAll("[data-wmt]").length;
     out.mathsColor = window.__store.config.rules.find((r) => r.name === "Maths").color;
@@ -66,6 +95,7 @@
     btn(/Catégoriser/).click();
     await sleep(200);
     out.msgs = window.__msgs;
+    }
   } catch (e) {
     out.error = String((e && e.stack) || e);
   }

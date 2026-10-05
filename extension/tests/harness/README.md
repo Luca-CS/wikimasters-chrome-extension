@@ -30,6 +30,7 @@ Les scénarios dont une page manque sont sautés.
 | Nom | Ce qui est vérifié |
 | --- | --- |
 | `collection` | panneau et proposition d'analyse, surlignage, couleur reprise du jeu, surlignage retiré quand l'étiquette est posée, analyse des 4 pages (fausse pagination), demande de catégorisation |
+| `collection-autotag` | étiquetage automatique des 4 pages : mode sélection, barre, fenêtre « Appliquer une étiquette » simulés ; plus rien à poser à la fin, étiquettes absentes du jeu (Ski, Shiny) sautées, « Défausser » jamais touché |
 | `pulls-full`, `pulls-regen` | lecture du compteur « 10 / 10 » et du minuteur « Prochain dans 1:43 » |
 | `pulls-reveal` | écran d'ouverture reconnu, suggestion sur la carte affichée, retour à 9/10 |
 | `pulls-auto-robot` | défilement des 5 cartes, pause sur la vérification « robot » (jamais cochée), « Continuer » |

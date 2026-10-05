@@ -1,9 +1,9 @@
-// Content script WikiMasters, en lecture seule :
+// Content script WikiMasters :
 // - page Collection : panneau « Tagger », analyse de toutes les pages (lecture du DOM + clic sur
-//   « Suivant → », avec une pause entre deux pages) et surlignage des cartes à étiqueter ;
-// - page Paquets : relevé du compteur de paquets (pour les rappels) et étiquettes suggérées pour
-//   les cartes tirées.
-// L'extension ne pose jamais d'étiquette et n'ouvre jamais de paquet : ça reste manuel.
+//   « Suivant → », avec une pause entre deux pages), surlignage des cartes à étiqueter et, à ta
+//   demande, pose des étiquettes suggérées sur toute la collection (étiquettes existantes seulement) ;
+// - page Paquets : relevé du compteur de paquets (pour les rappels), étiquettes suggérées pour
+//   les cartes tirées, défilement et enchaînement des paquets lancés par ton clic sur « Ouvrir ».
 (() => {
   if (window.top !== window || window.__wmtLoaded) return;
   window.__wmtLoaded = true;
@@ -421,7 +421,7 @@
 
   function startChain() {
     note(null);
-    if (orphaned || !config.settings.autoReveal || !config.settings.autoChain) return;
+    if (orphaned || !config || !config.settings.autoReveal || !config.settings.autoChain) return; // config pas encore chargée
     const live = dom.packs();
     const total = Math.max(1, live ? live.count : 1);
     chain = { abort: false, left: total - 1, total };
@@ -463,6 +463,7 @@
   // l'appui et remplacer l'écran aussitôt, auquel cas le « click » n'arriverait jamais.
   document.addEventListener("pointerdown", (e) => {
     if (!e.isTrusted || fromPanel(e)) return;
+    if (tagging) return stopTagging();
     if (onOpenButton(e.target)) {
       stopAll();
       return startChain();
@@ -473,6 +474,7 @@
   // Touche du clavier : Entrée / Espace sur « Ouvrir » (re)lance l'enchaînement ; sinon, arrêt.
   document.addEventListener("keydown", (e) => {
     if (!e.isTrusted || SILENT_KEYS.test(e.key) || fromPanel(e)) return;
+    if (tagging) return stopTagging();
     if ((e.key === "Enter" || e.key === " ") && onOpenButton(document.activeElement)) {
       stopAll();
       return startChain();
@@ -618,7 +620,7 @@
   }
 
   async function runScan(ignoreFilters = false) {
-    if (scanning || route !== "collection") return;
+    if (scanning || tagging || route !== "collection") return;
     const filters = dom.activeFilters();
     if (filters.length && !ignoreFilters) {
       setOpen(true);
@@ -674,6 +676,190 @@
         ui.progress.hidden = true;
         renderPanel();
       }
+    }
+  }
+
+  // --- Étiquetage automatique de toute la collection --------------------------------
+  // Page par page : pour chaque étiquette suggérée qui existe dans le jeu, mode sélection,
+  // clic sur ses cartes, « Étiqueter », clic sur l'étiquette, « Terminé », sortie du mode
+  // sélection. Les étiquettes absentes du jeu ne sont jamais créées : elles sont sautées.
+  // « Défausser » n'est jamais touché. Arrêt dès que tu cliques ou tapes ailleurs que dans le panneau.
+
+  let tagging = null; // {abort}
+  const TAG_CLICK = 140; // ms entre deux clics, × rythme naturel
+
+  async function waitVisible(job) {
+    while (!job.abort && document.hidden) await sleep(300);
+    if (job.abort) throw new Aborted();
+  }
+
+  async function step(job, base = TAG_CLICK) {
+    await wait(job, delay(base));
+    await waitVisible(job);
+  }
+
+  async function until(job, test, ms, what) {
+    if (await waitFor(job, test, ms)) return;
+    if (job.abort) throw new Aborted();
+    throw new Error(what);
+  }
+
+  async function enterSelection(job) {
+    if (dom.quitSelectionButton()) return;
+    const b = dom.selectButton();
+    if (!b) throw new Error("bouton « Sélectionner » introuvable.");
+    b.click();
+    await until(job, () => !!dom.quitSelectionButton(), 5000, "le mode sélection ne s'est pas activé.");
+  }
+
+  /** Ferme la fenêtre d'étiquetage et quitte le mode sélection (aussi après un arrêt). */
+  async function leaveSelection() {
+    const job = { abort: false };
+    const modal = dom.tagModal();
+    if (modal) {
+      (modal.done || modal.close)?.click();
+      await waitFor(job, () => !dom.tagModal(), 3000);
+    }
+    const quit = dom.quitSelectionButton();
+    if (quit) {
+      quit.click();
+      await waitFor(job, () => !!dom.selectButton(), 5000);
+    }
+  }
+
+  /** Carte de la page courante pour un élément du plan (même position, sinon même titre). */
+  function findCard(item) {
+    const cards = dom.cards(document, knownTags());
+    const at = cards[item.pos - 1];
+    return at && at.title === item.title ? at : cards.find((c) => c.title === item.title) || null;
+  }
+
+  /** Pose `tag` sur les cartes `items` de la page affichée. Renvoie false si l'étiquette n'existe pas. */
+  async function applyTag(job, tag, items, stats) {
+    await enterSelection(job);
+    let clicked = 0;
+    for (const item of items) {
+      const card = findCard(item);
+      if (!card) continue;
+      card.h3.click();
+      clicked++;
+      await step(job);
+    }
+    // Une carte avec un échange en attente n'est pas sélectionnable : on prend ce qui l'est.
+    await waitFor(job, () => {
+      const bar = dom.selectionBar();
+      return bar && !bar.refreshing && bar.count === clicked && !bar.tag.disabled;
+    }, 3000);
+    if (job.abort) throw new Aborted();
+    const bar = dom.selectionBar();
+    if (!bar || !bar.count || bar.tag.disabled) {
+      stats.failed += items.length;
+      await leaveSelection();
+      return true;
+    }
+    bar.tag.click();
+    await until(job, () => {
+      const m = dom.tagModal();
+      return m && !m.loading && m.tags.size > 0;
+    }, 10000, "la fenêtre « Appliquer une étiquette » ne s'est pas ouverte.");
+    const button = dom.tagModal().tags.get(tag);
+    if (!button) {
+      await leaveSelection();
+      return false;
+    }
+    await step(job);
+    button.click();
+    await until(job, () => {
+      const m = dom.tagModal();
+      return !m || m.added != null || m.error;
+    }, 20000, `pas de confirmation du site après « ${tag} ».`);
+    const m = dom.tagModal();
+    if (m && m.error) throw new Error(`« ${tag} » : ${m.error}`);
+    stats.applied += m && m.added != null ? m.added : bar.count;
+    stats.byTag.set(tag, (stats.byTag.get(tag) || 0) + bar.count);
+    await step(job);
+    await leaveSelection();
+    return true;
+  }
+
+  async function tagPage(job, stats, missing) {
+    const p = dom.pager();
+    const plan = new Map(); // étiquette -> [{pos, title}], calculé avant toute pose
+    for (const c of dom.cards(document, knownTags())) {
+      for (const m of suggestionsFor(c)) {
+        if (!plan.has(m.tag)) plan.set(m.tag, []);
+        plan.get(m.tag).push({ pos: c.pos, title: c.title });
+      }
+    }
+    for (const [tag, items] of plan) {
+      ui.ptext.textContent = `Page ${p.page} / ${p.total} · ${tag} (${plural(items.length, "carte")}) · ${plural(stats.applied, "étiquette")} posées`;
+      if (missing.has(tag) || !(await applyTag(job, tag, items, stats))) {
+        missing.add(tag);
+        stats.skipped.set(tag, (stats.skipped.get(tag) || 0) + items.length);
+      }
+      await step(job, 250);
+    }
+    stats.pages++;
+  }
+
+  function tagSummary(stats) {
+    const done = [...stats.byTag].map(([t, n]) => `${t} ${n}`).join(", ");
+    const skipped = [...stats.skipped].map(([t, n]) => `${t} (${n})`).join(", ");
+    return `${plural(stats.applied, "étiquette")} posée${stats.applied > 1 ? "s" : ""} sur ${plural(stats.pages, "page")}` +
+      (done ? ` : ${done}.` : ".") +
+      (skipped ? ` Sautées car absentes du jeu : ${skipped}.` : "") +
+      (stats.failed ? ` ${plural(stats.failed, "carte")} non sélectionnable${stats.failed > 1 ? "s" : ""}.` : "");
+  }
+
+  function stopTagging() {
+    if (!tagging || tagging.abort) return;
+    tagging.abort = true;
+    log("étiquetage arrêté : tu as pris la main");
+  }
+
+  async function runAutoTag(ignoreFilters = false) {
+    if (scanning || tagging || route !== "collection") return;
+    const filters = dom.activeFilters();
+    if (filters.length && !ignoreFilters) {
+      setOpen(true);
+      note(`Filtre actif (${filters.join(", ")}) : seules les cartes filtrées seraient étiquetées.`, "warn", {
+        label: "Étiqueter quand même",
+        onclick: () => runAutoTag(true),
+      });
+      return;
+    }
+    const job = (tagging = { abort: false });
+    const stats = { applied: 0, pages: 0, failed: 0, byTag: new Map(), skipped: new Map() };
+    const missing = new Set();
+    note(null);
+    renderPanel();
+    ui.progress.hidden = false;
+    try {
+      await leaveSelection();
+      let p = dom.pager();
+      if (!p) throw new Error("Pagination introuvable : recharge la page (F5) si elle ne s'affiche pas.");
+      while ((p = dom.pager()).page > 1) await turnPage(job, p.prev, p.page - 1);
+      for (;;) {
+        p = dom.pager();
+        ui.bar.style.width = `${Math.round((100 * (p.page - 1)) / p.total)}%`;
+        await tagPage(job, stats, missing);
+        if (p.page >= p.total) break;
+        await turnPage(job, p.next, p.page + 1);
+      }
+      log("étiquetage terminé :", tagSummary(stats));
+      note(`✓ ${tagSummary(stats)}`, "ok");
+    } catch (e) {
+      log("étiquetage interrompu :", e && e.message);
+      if (e instanceof Aborted) note(`Étiquetage arrêté. ${tagSummary(stats)}`, "warn");
+      else note(`Étiquetage interrompu : ${e.message} ${tagSummary(stats)}`, "err");
+    } finally {
+      await leaveSelection();
+      tagging = null;
+      if (ui) {
+        ui.progress.hidden = true;
+        renderPanel();
+      }
+      refresh();
     }
   }
 
@@ -795,6 +981,13 @@
             ref("stopBtn", h("button", { class: "btn", hidden: true, onclick: () => scanning && (scanning.abort = true) }, "Arrêter l'analyse")),
             ref("homeBtn", h("button", { class: "btn", hidden: true, onclick: () => location.reload() }, "↺ Revenir à la page 1"))),
           h("section", {},
+            h("h4", {}, "Étiquetage automatique"),
+            h("p", { class: "muted small" },
+              "Pose dans le jeu toutes les étiquettes suggérées, page par page. Seules les étiquettes qui existent déjà dans le jeu sont posées. " +
+              "Un clic ou une touche ailleurs que dans ce panneau arrête tout."),
+            ref("tagBtn", h("button", { class: "btn accent", onclick: () => runAutoTag() }, "Étiqueter toute la collection")),
+            ref("tagStop", h("button", { class: "btn", hidden: true, onclick: stopTagging }, "Arrêter l'étiquetage"))),
+          h("section", {},
             h("h4", {}, "Catégorisation"),
             h("label", { class: "toggle" },
               h("span", {}, "Enrichir avec Wikidata"),
@@ -892,8 +1085,10 @@
     ui.scanInfo.textContent = scanMeta
       ? `Dernière analyse : ${fmtDate(scanMeta.at)} · ${plural(scanMeta.n, "carte")} · ${scanMeta.pages} pages`
       : "Pas encore analysée.";
-    ui.scanBtn.hidden = !!scanning;
+    ui.scanBtn.hidden = !!(scanning || tagging);
     ui.stopBtn.hidden = !scanning;
+    ui.tagBtn.hidden = !!(scanning || tagging);
+    ui.tagStop.hidden = !tagging;
     ui.catBtn.disabled = !scanMeta || !!scanning;
     ui.catBtn.className = scanMeta && !scanning ? "btn accent" : "btn";
   }
@@ -944,6 +1139,7 @@
     observer = null;
     clearInterval(packsTimer);
     if (scanning) scanning.abort = true;
+    if (tagging) tagging.abort = true;
     stopAll();
     clearHighlights();
     if (ui) ui.host.remove();

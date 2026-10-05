@@ -50,10 +50,17 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass  # les 404 des images du site (non copiées) n'intéressent personne
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # File d'attente de 5 par défaut : les pages envoient des dizaines de requêtes à la fois
+    # (images, CSS, scripts) et Windows refusait parfois une connexion, d'où un script de
+    # l'extension manquant au hasard (WMT.dom indéfini) et des scénarios instables.
+    request_queue_size = 256
+
+
 @contextlib.contextmanager
 def serve(root: Path):
     handler = functools.partial(QuietHandler, directory=str(root))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), handler)
+    server = Server(("127.0.0.1", free_port()), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -98,7 +105,9 @@ def check(name, ok_list, out):
     for label in failed:
         print("    échec :", label)
     if status == "✗":
-        print("    résultat :", json.dumps(out, ensure_ascii=False)[:1500])
+        print("    résultat :", json.dumps({k: v for k, v in out.items() if k != "console"}, ensure_ascii=False)[:1500])
+        for line in (out.get("console") or [])[-8:]:
+            print("    console :", line[:300])
     return status == "✓"
 
 
@@ -122,6 +131,14 @@ SCENARIOS = [
             and (o.get("shiny") or {}).get("flags") == ["Shiny"] and len((o.get("shiny") or {}).get("rarity") or "") <= 2),
         ("4 pages lues, 200 cartes, positions exactes", o.get("scanCards") == 200 and o.get("positionsOk") and o.get("clicks") == 4),
         ("catégorisation demandée", (o.get("msgs") or [{}])[0].get("page") == "report"),
+    ]),
+    ("collection-autotag", "page", "/collection/?autotag", None, lambda o: [
+        ("étiquetage terminé sur les 4 pages", o.get("finished") is True and o.get("pages") == [50, 50, 50, 50]
+            and {a.split(":")[0] for a in o.get("applied", [])} == {"1", "2", "3", "4"}),
+        ("plus aucune étiquette existante à poser", o.get("applied") and o.get("remaining") == []),
+        ("étiquettes absentes du jeu sautées, jamais créées", not any(":Ski:" in a or ":Shiny:" in a for a in o.get("applied", []))
+            and "Sautées" in (o.get("note") or "")),
+        ("« Défausser » jamais touché, mode sélection quitté", o.get("discarded") == 0 and o.get("selectionLeft") is True),
     ]),
     ("pulls-full", "page", "/pulls/?state=full", None, lambda o: [
         ("compteur 10/10 lu", o.get("dom", {}).get("packs") == {"count": 10, "max": 10, "nextMs": None}),

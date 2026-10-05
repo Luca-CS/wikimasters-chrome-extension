@@ -58,6 +58,22 @@ try {
   const tab = await http(`/json/new?${encodeURIComponent(target)}`, "PUT");
   page = await connect(tab.webSocketDebuggerUrl);
   const { call } = page;
+  // Onglet au premier plan et considéré comme actif : sinon Chrome le traite comme masqué
+  // (document.hidden, minuteurs ralentis) et l'extension se met en pause comme prévu.
+  await call("Page.bringToFront");
+  await call("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // Journal de la console (exceptions comprises), joint au résultat en cas d'échec.
+  out.console = [];
+  page.ws.addEventListener("message", (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.method === "Runtime.consoleAPICalled") {
+      out.console.push(msg.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200));
+    } else if (msg.method === "Runtime.exceptionThrown") {
+      const d = msg.params.exceptionDetails;
+      out.console.push("EXCEPTION " + ((d.exception && d.exception.description) || d.text).slice(0, 300));
+    }
+  });
+  await call("Runtime.enable");
   const ev = async (expr) => (await call("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true })).result.value;
   const until = async (expr, ms) => {
     const end = Date.now() + ms;
@@ -82,6 +98,7 @@ try {
   const panel = () => ev(`[...document.getElementById("wmt-host").shadowRoot.querySelectorAll(".note, .muted")].map((e) => e.textContent).filter(Boolean)`);
   const done = `__sim.count === 0 && !WMT.dom.reveal() && __sim.continues === 3`;
 
+  out.visibility = await ev(`document.visibilityState`);
   if (mode === "selftest" || mode === "page") {
     await until(`!!document.getElementById("wmt-out")`, 150000);
     Object.assign(out, JSON.parse(await ev(`document.getElementById("wmt-out").textContent`)));

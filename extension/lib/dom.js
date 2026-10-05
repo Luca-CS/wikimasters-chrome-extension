@@ -142,6 +142,59 @@
     return out;
   }
 
+  // --- Sélection et étiquetage (page Collection, relevés le 02/10/2026) -------------
+  // « Sélectionner » (à côté du titre) passe en mode sélection : un clic sur une carte la
+  // sélectionne. Une barre ajoutée à <body> affiche « N cartes sélectionnées », « Étiqueter »,
+  // « Retirer l'étiquette » et « Défausser » (jamais utilisé : retire des cartes pour de bon).
+  // « Étiqueter » ouvre une fenêtre (dans <body>) « Appliquer une étiquette » : un bouton par
+  // étiquette existante (<button><span>Nom</span></button>) qui l'applique aussitôt, puis
+  // « N cartes étiquetées » et « Terminé ».
+
+  const buttonByText = (scope, re) => (scope ? [...scope.querySelectorAll("button")].find((b) => re.test(text(b))) || null : null);
+  const selectButton = (doc = document) => buttonByText(doc.querySelector("main"), /^Sélectionner$/);
+  const quitSelectionButton = (doc = document) => buttonByText(doc.querySelector("main"), /^Quitter la sélection$/);
+
+  /** Barre de sélection : {el, count, refreshing, tag} (tag = bouton « Étiqueter »), ou null. */
+  function selectionBar(doc = document) {
+    for (const top of doc.body ? doc.body.children : []) {
+      if (top.id === "wmt-host" || top.querySelector("main")) continue;
+      const tag = buttonByText(top, /^Étiqueter$/);
+      if (!tag) continue;
+      const m = text(top).match(/^(\d+) ?cartes? sélectionnées?/);
+      return { el: top, count: m ? +m[1] : 0, refreshing: /Actualisation/.test(text(top)), tag };
+    }
+    return null;
+  }
+
+  /**
+   * Fenêtre « Appliquer une étiquette » : {el, tags (nom -> bouton), loading, added (nombre de
+   * cartes étiquetées une fois appliquée, sinon null), error, done, close}, ou null.
+   */
+  function tagModal(doc = document) {
+    for (const top of doc.body ? doc.body.children : []) {
+      const h2 = top.querySelector("h2");
+      if (!h2 || text(h2) !== "Appliquer une étiquette") continue;
+      const tags = new Map();
+      for (const b of top.querySelectorAll("button")) {
+        const span = b.firstElementChild;
+        if (span && span.tagName === "SPAN" && b.childElementCount === 1 && text(span) && text(span) === text(b)) tags.set(text(span), b);
+      }
+      const input = top.querySelector("input");
+      const ps = [...top.querySelectorAll("p")].map(text);
+      const res = ps.map((t) => t.match(/^(\d+) ?cartes? étiquetées?/)).find(Boolean);
+      return {
+        el: top,
+        tags,
+        loading: !!input && /Chargement/.test(input.placeholder || ""),
+        added: res ? +res[1] : null,
+        error: ps.find((t) => /^Impossible/.test(t)) || "",
+        done: buttonByText(top, /^Terminé$/),
+        close: top.querySelector('button[aria-label="Fermer"]'),
+      };
+    }
+    return null;
+  }
+
   // --- Page Paquets (/pulls), relevée le 01/10/2026 ---------------------------------
   // <div class="card-frame ..."><div><span>7</span><span> / 10</span></div><div>paquets disponibles</div>
   //   <div>Prochain dans <span class="font-mono">1:43</span></div></div>
@@ -299,6 +352,7 @@
 
   WMT.dom = {
     clean, isShinyBadge, pager, cardElements, readCard, cards, activeFilters, hexColor,
+    selectButton, quitSelectionButton, selectionBar, tagModal,
     packs, parseDuration, reveal, revealNav, isOpenButton, openButton, overlay, blockingDialog, blockingText,
     sanction, packError, firstSentence,
   };
