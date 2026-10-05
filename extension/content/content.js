@@ -39,6 +39,7 @@
     wd = await store.get("wd");
     scanMeta = await store.get("scanMeta");
     packsState = await store.get("packs");
+    tagResume = await store.get("tagRun");
     memo = new Map();
   }
 
@@ -55,6 +56,7 @@
       }
       if (ch.scanMeta) scanMeta = ch.scanMeta.newValue || null;
       if (ch.packs) packsState = ch.packs.newValue || null;
+      if (ch.tagRun) tagResume = ch.tagRun.newValue || null;
       if (route) {
         renderPanel();
         scheduleRefresh();
@@ -596,106 +598,22 @@
     ui.fabLabel.textContent = count != null ? `Tagger · ${count}/${max}` : "Tagger";
   }
 
-  // --- Analyse de toutes les pages de la collection ----------------------------------
+  // --- Pilotage de la page Collection --------------------------------------------------
+  // Toute action qui change la liste (page, filtre, étiquette posée, défausse) la recharge,
+  // après un court délai sans aucun signe (voir dom.collectionLoading). Règle unique : on ne
+  // lit et on ne clique qu'une collection au repos, et chaque action attend la fin du
+  // rechargement qu'elle a déclenché (reloadAfter). Lire pendant ce délai donnait des cartes
+  // périmées, cliquer pendant le chargement des boutons désactivés.
 
+  const CLICK_PAUSE = 140; // ms entre deux clics, × rythme naturel
   const signature = () => dom.cardElements().map((c) => c.h3.textContent).join("\u0001");
-
-  /** Clique sur Précédent/Suivant et attend que la page `expected` soit affichée. */
-  async function turnPage(job, button, expected) {
-    if (!button || button.disabled) throw new Error("Bouton de pagination introuvable ou désactivé.");
-    await sleep(Math.max(300, +config.settings.pageDelay || 1000));
-    if (job.abort) throw new Aborted();
-    const before = signature();
-    button.click();
-    const start = Date.now();
-    while (Date.now() - start < 20000) {
-      await sleep(150);
-      if (job.abort) throw new Aborted();
-      const p = dom.pager();
-      if (!p || p.page !== expected) continue;
-      const sig = signature();
-      if (!sig || (sig === before && Date.now() - start < 5000)) continue;
-      await sleep(250); // la grille ne bouge plus ?
-      if (signature() === sig) return;
-    }
-    throw new Error(`La page ${expected} ne s'est pas affichée à temps.`);
-  }
-
-  async function runScan(ignoreFilters = false) {
-    if (scanning || tagging || selling || route !== "collection") return;
-    const filters = dom.activeFilters();
-    if (filters.length && !ignoreFilters) {
-      setOpen(true);
-      note(`Filtre actif (${filters.join(", ")}) : l'analyse ne verrait qu'une partie de ta collection.`, "warn", {
-        label: "Analyser quand même",
-        onclick: () => runScan(true),
-      });
-      return;
-    }
-    ui.prompt.hidden = true;
-    const job = (scanning = { abort: false });
-    const pages = new Map();
-    const colors = {};
-    note(null);
-    renderPanel();
-    try {
-      let p = dom.pager();
-      if (!p) throw new Error("Pagination introuvable : es-tu bien sur la page Collection ?");
-      const grab = () => {
-        const cur = dom.pager();
-        const cards = dom.cards(document, knownTags());
-        cards.forEach((c) => Object.assign(colors, c.colors));
-        pages.set(cur.page, cards.map(({ root, el, h3, colors: _, ...c }) => ({ ...c, page: cur.page })));
-        progress(cur, pages);
-      };
-      grab();
-      // Retour à la page 1 (en lisant au passage), puis lecture jusqu'à la dernière page.
-      while ((p = dom.pager()).page > 1) {
-        await turnPage(job, p.prev, p.page - 1);
-        if (!pages.has(p.page - 1)) grab();
-      }
-      while ((p = dom.pager()).page < p.total) {
-        await turnPage(job, p.next, p.page + 1);
-        if (!pages.has(p.page + 1)) grab();
-      }
-      const missing = Array.from({ length: p.total }, (_, i) => i + 1).filter((n) => !pages.has(n));
-      if (missing.length) throw new Error(`Pages non lues : ${missing.join(", ")}.`);
-
-      const cards = [...pages.keys()].sort((a, b) => a - b).flatMap((n) => pages.get(n));
-      const meta = { at: Date.now(), n: cards.length, pages: p.total };
-      await safe(() => store.set("scan", { at: meta.at, pages: p.total, cards }));
-      await safe(() => store.set("scanMeta", meta));
-      scanMeta = meta;
-      syncColors(colors);
-      note(`✓ ${plural(cards.length, "carte")} lues sur ${p.total} pages. Tu peux lancer la catégorisation.`, "ok");
-      ui.homeBtn.hidden = false;
-    } catch (e) {
-      if (e instanceof Aborted) note("Analyse arrêtée.", "warn");
-      else note(`Analyse interrompue : ${e.message}`, "err");
-    } finally {
-      scanning = null;
-      if (ui) {
-        ui.progress.hidden = true;
-        renderPanel();
-      }
-    }
-  }
-
-  // --- Étiquetage automatique de toute la collection --------------------------------
-  // Page par page : pour chaque étiquette suggérée qui existe dans le jeu, mode sélection,
-  // clic sur ses cartes, « Étiqueter », clic sur l'étiquette, « Terminé », sortie du mode
-  // sélection. Les étiquettes absentes du jeu ne sont jamais créées : elles sont sautées.
-  // « Défausser » n'est jamais touché. Arrêt dès que tu cliques ou tapes ailleurs que dans le panneau.
-
-  let tagging = null; // {abort}
-  const TAG_CLICK = 140; // ms entre deux clics, × rythme naturel
 
   async function waitVisible(job) {
     while (!job.abort && document.hidden) await sleep(300);
     if (job.abort) throw new Aborted();
   }
 
-  async function step(job, base = TAG_CLICK) {
+  async function step(job, base = CLICK_PAUSE) {
     await wait(job, delay(base));
     await waitVisible(job);
   }
@@ -706,15 +624,112 @@
     throw new Error(what);
   }
 
+  /** Attend que la collection ne soit plus en train de se recharger. */
+  async function waitIdle(job) {
+    await until(job, () => !dom.collectionLoading(), 45000, "la collection est restée en chargement plus de 45 s.");
+  }
+
+  /**
+   * Lance `action` (un clic qui recharge la liste) puis attend la fin du rechargement qu'elle
+   * provoque. Le début est guetté par un MutationObserver, qui le voit même s'il est très
+   * bref ; la fin, quand plus rien n'indique un chargement. `failed()` arrête l'attente si le
+   * site affiche une erreur au lieu de recharger : renvoie alors false.
+   */
+  async function reloadAfter(job, action, what, failed = () => false) {
+    await waitIdle(job);
+    let seen = false;
+    const watch = new MutationObserver(() => {
+      if (!seen && dom.collectionLoading()) seen = true;
+    });
+    watch.observe(document.body, {
+      subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "disabled"],
+    });
+    try {
+      action();
+      await until(job, () => seen || dom.collectionLoading() || failed(), 20000, `${what} : le site n'a pas rechargé la collection.`);
+      if (!seen && !dom.collectionLoading()) return false; // erreur affichée par le site
+      await waitIdle(job);
+    } finally {
+      watch.disconnect();
+    }
+    await sleep(150); // dernier rendu des cartes
+    return true;
+  }
+
+  /**
+   * Page affichée (collection au repos) : {page, total, prev, next}. Le site n'affiche pas de
+   * pagination quand tout tient sur une page. Sans pagination ni « Sélectionner », c'est que le
+   * total de la collection n'a pas été chargé (erreur du site) : on ne devine pas.
+   */
+  function pageInfo() {
+    const p = dom.pager();
+    if (p) return p;
+    if (dom.cardElements().length && !dom.selectButton() && !dom.quitSelectionButton()) {
+      throw new Error("le site n'a pas chargé le total de ta collection (ni pagination ni « Sélectionner ») : recharge la page (F5).");
+    }
+    return { page: 1, total: 1, prev: null, next: null };
+  }
+
+  // Le total de pages vient d'une requête séparée, qui arrive parfois quelques secondes après
+  // les cartes : juste après un rechargement de la page 1, « Page X / Y » et l'état de
+  // « Suivant » peuvent être périmés. Pour savoir s'il reste une page, on se fie d'abord au
+  // nombre de cartes (le site en affiche 50 par page), puis à « Suivant », en lui laissant le
+  // temps de s'activer.
+  const PAGE_SIZE = 50;
+
+  const navButton = (dir) => {
+    const p = dom.pager();
+    const b = p && (dir > 0 ? p.next : p.prev);
+    return b && !b.disabled ? b : null;
+  };
+
+  /** Reste-t-il une page après celle affichée ? */
+  async function hasNextPage(job) {
+    await waitIdle(job);
+    if (dom.cardElements().length < PAGE_SIZE) return false; // page incomplète : la dernière
+    return waitFor(job, () => !!navButton(1), 10000);
+  }
+
+  /** Page précédente (-1) ou suivante (+1) ; attend que la nouvelle page soit chargée. */
+  async function turnPage(job, dir) {
+    await waitIdle(job);
+    const p = pageInfo();
+    const target = p.page + dir;
+    await waitFor(job, () => !!navButton(dir), 10000);
+    if (job.abort) throw new Aborted();
+    const button = navButton(dir);
+    if (!button) {
+      throw new Error(`impossible d'aller à la page ${target} : bouton « ${dir > 0 ? "Suivant" : "Précédent"} » indisponible (page ${p.page} / ${p.total}).`);
+    }
+    await wait(job, Math.max(300, +config.settings.pageDelay || 1000));
+    if (job.abort) throw new Aborted();
+    await reloadAfter(job, () => button.click(), `Page ${target}`);
+    const now = pageInfo();
+    if (now.page !== target) throw new Error(`la page ${target} ne s'est pas affichée (page ${now.page} à la place).`);
+    return now;
+  }
+
+  /** Va à la page `target`, une page à la fois (le site n'a que « Précédent » et « Suivant »). */
+  async function goToPage(job, target, label) {
+    let p = pageInfo();
+    target = Math.max(1, target); // pas de plafond : le total affiché peut être périmé
+    while (p.page !== target) {
+      ui.ptext.textContent = `${label} : page ${p.page} → ${target}`;
+      p = await turnPage(job, target > p.page ? 1 : -1);
+    }
+    return p;
+  }
+
   async function enterSelection(job) {
     if (dom.quitSelectionButton()) return;
+    await waitIdle(job);
     const b = dom.selectButton();
-    if (!b) throw new Error("bouton « Sélectionner » introuvable.");
+    if (!b) throw new Error("bouton « Sélectionner » introuvable : recharge la page (F5).");
     b.click();
     await until(job, () => !!dom.quitSelectionButton(), 5000, "le mode sélection ne s'est pas activé.");
   }
 
-  /** Ferme la fenêtre d'étiquetage et quitte le mode sélection (aussi après un arrêt). */
+  /** Annule une confirmation, ferme la fenêtre d'étiquetage et quitte le mode sélection (aussi après un arrêt). */
   async function leaveSelection() {
     const job = { abort: false };
     const dialog = dom.discardDialog();
@@ -734,11 +749,91 @@
     }
   }
 
-  /** Carte de la page courante pour un élément du plan (même position, sinon même titre). */
+  /** Carte de la page affichée pour un élément d'un plan (même position, sinon même titre). */
   function findCard(item) {
     const cards = dom.cards(document, knownTags());
     const at = cards[item.pos - 1];
     return at && at.title === item.title ? at : cards.find((c) => c.title === item.title) || null;
+  }
+
+  // --- Analyse de toutes les pages de la collection ----------------------------------
+
+  async function runScan(ignoreFilters = false) {
+    if (scanning || tagging || selling || route !== "collection") return;
+    const filters = dom.activeFilters();
+    if (filters.length && !ignoreFilters) {
+      setOpen(true);
+      note(`Filtre actif (${filters.join(", ")}) : l'analyse ne verrait qu'une partie de ta collection.`, "warn", {
+        label: "Analyser quand même",
+        onclick: () => runScan(true),
+      });
+      return;
+    }
+    ui.prompt.hidden = true;
+    const job = (scanning = { abort: false });
+    const pages = new Map();
+    const colors = {};
+    note(null);
+    renderPanel();
+    try {
+      await waitIdle(job);
+      let p = pageInfo();
+      const grab = () => {
+        const cards = dom.cards(document, knownTags());
+        cards.forEach((c) => Object.assign(colors, c.colors));
+        pages.set(p.page, cards.map(({ root, el, h3, colors: _, ...c }) => ({ ...c, page: p.page })));
+        progress(p, pages);
+      };
+      grab();
+      // Retour à la page 1 (en lisant au passage), puis lecture jusqu'à la dernière page.
+      while (p.page > 1) {
+        p = await turnPage(job, -1);
+        if (!pages.has(p.page)) grab();
+      }
+      while (await hasNextPage(job)) {
+        p = await turnPage(job, 1);
+        if (!pages.has(p.page)) grab();
+      }
+      const last = p.page;
+      const missing = Array.from({ length: last }, (_, i) => i + 1).filter((n) => !pages.has(n));
+      if (missing.length) throw new Error(`Pages non lues : ${missing.join(", ")}.`);
+
+      const cards = [...pages.keys()].sort((a, b) => a - b).flatMap((n) => pages.get(n));
+      const meta = { at: Date.now(), n: cards.length, pages: last };
+      await safe(() => store.set("scan", { at: meta.at, pages: last, cards }));
+      await safe(() => store.set("scanMeta", meta));
+      scanMeta = meta;
+      syncColors(colors);
+      note(`✓ ${plural(cards.length, "carte")} lues sur ${plural(last, "page")}. Tu peux lancer la catégorisation.`, "ok");
+      ui.homeBtn.hidden = false;
+    } catch (e) {
+      if (e instanceof Aborted) note("Analyse arrêtée.", "warn");
+      else note(`Analyse interrompue : ${e.message}`, "err");
+    } finally {
+      scanning = null;
+      if (ui) {
+        ui.progress.hidden = true;
+        renderPanel();
+      }
+    }
+  }
+
+  // --- Étiquetage automatique de toute la collection --------------------------------
+  // Page par page : pour chaque étiquette suggérée qui existe dans le jeu, mode sélection,
+  // clic sur ses cartes, « Étiqueter », clic sur l'étiquette (le site la pose et recharge la
+  // liste), « Terminé », sortie du mode sélection. Les étiquettes absentes du jeu ne sont
+  // jamais créées : elles sont sautées. Arrêt dès que tu cliques ou tapes hors du panneau.
+  // Chaque page terminée est notée (clé tagRun) : relancé, l'étiquetage reprend là où il
+  // s'était arrêté, au lieu de revenir page par page jusqu'à la première.
+
+  let tagging = null; // {abort}
+  let tagResume = null; // {next, total, at} : prochaine page à étiqueter
+  const RESUME_MS = 24 * 3600 * 1000;
+
+  /** Page de reprise valable pour une collection de `total` pages, sinon null. */
+  function resumePage(total) {
+    const r = tagResume;
+    return r && Date.now() - r.at < RESUME_MS && r.total === total && r.next > 1 && r.next <= total ? r.next : null;
   }
 
   /** Pose `tag` sur les cartes `items` de la page affichée. Renvoie false si l'étiquette n'existe pas. */
@@ -756,14 +851,16 @@
     await waitFor(job, () => {
       const bar = dom.selectionBar();
       return bar && !bar.refreshing && bar.count === clicked && !bar.tag.disabled;
-    }, 3000);
+    }, 5000);
     if (job.abort) throw new Aborted();
     const bar = dom.selectionBar();
-    if (!bar || !bar.count || bar.tag.disabled) {
+    if (!bar || bar.refreshing || !bar.count || bar.tag.disabled) {
+      log(`« ${tag} » : aucune des ${plural(items.length, "carte")} n'a pu être sélectionnée`);
       stats.failed += items.length;
       await leaveSelection();
       return true;
     }
+    const selected = bar.count;
     bar.tag.click();
     await until(job, () => {
       const m = dom.tagModal();
@@ -775,22 +872,18 @@
       return false;
     }
     await step(job);
-    button.click();
-    await until(job, () => {
-      const m = dom.tagModal();
-      return !m || m.added != null || m.error;
-    }, 20000, `pas de confirmation du site après « ${tag} ».`);
+    // Le clic pose l'étiquette, affiche « N cartes étiquetées » et recharge la collection.
+    const posed = await reloadAfter(job, () => button.click(), `« ${tag} »`, () => !!(dom.tagModal() && dom.tagModal().error));
     const m = dom.tagModal();
-    if (m && m.error) throw new Error(`« ${tag} » : ${m.error}`);
-    stats.applied += m && m.added != null ? m.added : bar.count;
-    stats.byTag.set(tag, (stats.byTag.get(tag) || 0) + bar.count);
-    await step(job);
+    if (!posed || (m && m.error)) throw new Error(`le site n'a pas posé « ${tag} »${m && m.error ? ` : ${m.error}` : ""}.`);
+    stats.applied += m && m.added != null ? m.added : selected;
+    stats.byTag.set(tag, (stats.byTag.get(tag) || 0) + selected);
     await leaveSelection();
     return true;
   }
 
-  async function tagPage(job, stats, missing) {
-    const p = dom.pager();
+  async function tagPage(job, p, stats, missing) {
+    await waitIdle(job);
     const plan = new Map(); // étiquette -> [{pos, title}], calculé avant toute pose
     for (const c of dom.cards(document, knownTags())) {
       for (const m of suggestionsFor(c)) {
@@ -824,14 +917,14 @@
     log("étiquetage arrêté : tu as pris la main");
   }
 
-  async function runAutoTag(ignoreFilters = false) {
+  async function runAutoTag(ignoreFilters = false, fromStart = false) {
     if (scanning || tagging || selling || route !== "collection") return;
     const filters = dom.activeFilters();
     if (filters.length && !ignoreFilters) {
       setOpen(true);
       note(`Filtre actif (${filters.join(", ")}) : seules les cartes filtrées seraient étiquetées.`, "warn", {
         label: "Étiqueter quand même",
-        onclick: () => runAutoTag(true),
+        onclick: () => runAutoTag(true, fromStart),
       });
       return;
     }
@@ -843,16 +936,19 @@
     ui.progress.hidden = false;
     try {
       await leaveSelection();
-      let p = dom.pager();
-      if (!p) throw new Error("Pagination introuvable : recharge la page (F5) si elle ne s'affiche pas.");
-      while ((p = dom.pager()).page > 1) await turnPage(job, p.prev, p.page - 1);
+      await waitIdle(job);
+      let p = pageInfo();
+      const resume = fromStart ? null : resumePage(p.total);
+      if (!fromStart && !resume && tagResume) log("reprise impossible : le nombre de pages a changé depuis l'interruption, départ de la page 1");
+      if (p.page !== (resume || 1)) p = await goToPage(job, resume || 1, resume ? "Reprise" : "Retour au début");
       for (;;) {
-        p = dom.pager();
         ui.bar.style.width = `${Math.round((100 * (p.page - 1)) / p.total)}%`;
-        await tagPage(job, stats, missing);
-        if (p.page >= p.total) break;
-        await turnPage(job, p.next, p.page + 1);
+        await tagPage(job, p, stats, missing);
+        await safe(() => store.set("tagRun", { next: p.page + 1, total: p.total, at: Date.now() }));
+        if (!(await hasNextPage(job))) break;
+        p = await turnPage(job, 1);
       }
+      await safe(() => store.remove("tagRun"));
       log("étiquetage terminé :", tagSummary(stats));
       note(`✓ ${tagSummary(stats)}`, "ok");
     } catch (e) {
@@ -871,49 +967,36 @@
   }
 
   // --- Vente (défausse) des cartes sans étiquette -----------------------------------
-  // Filtres du site « Sans étiquette » + raretés choisies dans le panneau, puis tant qu'il
-  // reste des cartes : page sélectionnée avec « Tout sélectionner (page) », favoris et cartes
-  // shiny désélectionnés (si « Garder »), « Défausser (+N) », confirmation du site après
-  // vérification du nombre. Les cartes vendues disparaissent : les suivantes remontent sur la
-  // même page. Avant chaque vente, chaque carte affichée est vérifiée (sans étiquette, bonne
-  // rareté) : au moindre écart, rien n'est vendu et tout s'arrête.
+  // Filtres du site « Sans étiquette » + raretés choisies dans le panneau (un clic à la fois,
+  // chacun suivi de son rechargement), puis tant qu'il reste des cartes : page sélectionnée
+  // avec « Tout sélectionner (page) », favoris et cartes shiny désélectionnés (si « Garder »),
+  // « Défausser (+N) », confirmation du site après vérification du nombre. Les cartes vendues
+  // disparaissent : les suivantes remontent sur la même page. Avant chaque vente, chaque carte
+  // affichée est vérifiée (sans étiquette, bonne rareté) : au moindre écart, rien n'est vendu.
 
   let selling = null; // {abort}
   const RARITY_ORDER = ["L", "UR", "SR", "R", "PC", "C"];
 
   async function setTagFilter(job, label) {
+    await waitIdle(job);
     const b = dom.tagFilterButton();
     if (!b) throw new Error("filtre d'étiquette introuvable.");
     if (dom.clean(b.textContent) === label) return;
     b.click();
     await until(job, () => dom.tagFilterOptions().has(label), 5000, `option « ${label} » introuvable dans le filtre d'étiquette.`);
     await step(job);
-    dom.tagFilterOptions().get(label).click();
-    await until(job, () => dom.clean(dom.tagFilterButton().textContent) === label, 5000, `le filtre « ${label} » ne s'est pas appliqué.`);
+    const option = dom.tagFilterOptions().get(label);
+    await reloadAfter(job, () => option.click(), `Filtre « ${label} »`);
+    if (dom.clean(dom.tagFilterButton().textContent) !== label) throw new Error(`le filtre « ${label} » ne s'est pas appliqué.`);
   }
 
   async function setRarityFilter(job, wanted) {
-    for (const [r, chip] of dom.rarityChips()) {
-      if (chip.on === wanted.has(r)) continue;
-      chip.button.click();
-      await step(job, 250);
+    for (const r of RARITY_ORDER) {
+      const chip = dom.rarityChips().get(r);
+      if (!chip || chip.on === wanted.has(r)) continue;
+      await reloadAfter(job, () => chip.button.click(), `Filtre de rareté ${r}`);
+      if (dom.rarityChips().get(r).on !== wanted.has(r)) throw new Error(`le filtre de rareté ${r} ne s'est pas appliqué.`);
     }
-    await until(job, () => [...dom.rarityChips()].every(([r, c]) => c.on === wanted.has(r)), 5000, "le filtre de rareté ne s'est pas appliqué.");
-  }
-
-  /** Attend que la liste ne bouge plus (rechargement après un filtre ou une vente). */
-  async function settle(job) {
-    let last = null;
-    let since = Date.now();
-    await until(job, () => {
-      const bar = dom.selectionBar();
-      const s = `${signature()}|${dom.emptyResult()}|${bar && bar.refreshing}`;
-      if (s !== last) {
-        last = s;
-        since = Date.now();
-      }
-      return !(bar && bar.refreshing) && Date.now() - since > 900;
-    }, 20000, "la collection ne s'est pas rechargée.");
   }
 
   async function sellPage(job, sell, kept, stats) {
@@ -951,14 +1034,15 @@
     }
     await step(job, 300);
     if (job.abort) throw new Aborted(); // dernier moment pour s'arrêter avant la vente
-    dialog.confirm.click();
-    await until(job, () => !dom.discardDialog() || !!dom.discardDialog().error, 20000, "pas de réponse du site après « Défausser ».");
-    const refused = dom.discardDialog();
-    if (refused) {
-      if (refused.cancel) refused.cancel.click();
-      throw new Error(`le site a refusé la défausse : ${refused.error}`);
+    // La confirmation défausse les cartes, ferme la fenêtre et recharge la collection.
+    const sold = await reloadAfter(job, () => dialog.confirm.click(), "Défausse", () => !!(dom.discardDialog() && dom.discardDialog().error));
+    if (!sold) {
+      const refused = dom.discardDialog();
+      if (refused && refused.cancel) refused.cancel.click();
+      throw new Error(`le site a refusé la défausse : ${(refused && refused.error) || "pas de réponse"}.`);
     }
-    stats.sold += sell.length;
+    const n = dom.discardedMessage();
+    stats.sold += n != null ? n : sell.length;
     log(`${plural(sell.length, "carte")} vendue${sell.length > 1 ? "s" : ""} :`, sell.map((c) => c.title).join(", "));
     await leaveSelection();
   }
@@ -995,27 +1079,27 @@
     ui.bar.style.width = "0%";
     try {
       await leaveSelection();
+      ui.ptext.textContent = "Filtres « Sans étiquette » et raretés…";
       await setTagFilter(job, "Sans étiquette");
       await setRarityFilter(job, rarities);
-      await settle(job);
-      let p;
-      while ((p = dom.pager()) && p.page > 1) await turnPage(job, p.prev, p.page - 1);
+      let p = pageInfo();
+      if (p.page !== 1) p = await goToPage(job, 1, "Retour au début");
       for (let round = 0; round < 1000; round++) {
-        await settle(job);
+        await waitIdle(job);
+        p = pageInfo();
         const cards = dom.cards(document, knownTags());
         if (!cards.length || dom.emptyResult()) break;
         const wrong = cards.find((c) => c.tags.length || !rarities.has(c.rarity));
         if (wrong) {
-          throw new Error(`filtre non appliqué : « ${wrong.title} » ${wrong.tags.length ? "a une étiquette" : `est ${wrong.rarity}`}. Rien n'a été vendu sur cette page.`);
+          throw new Error(`carte inattendue malgré les filtres : « ${wrong.title} » ${wrong.tags.length ? "a une étiquette" : `est ${wrong.rarity}`}. Rien n'a été vendu sur cette page.`);
         }
         const kept = cards.filter((c) => (keep && (dom.isStarred(c) || c.shiny)) || dom.pendingTrade(c));
         kept.forEach((c) => stats.kept.add(c.title));
         const sell = cards.filter((c) => !kept.includes(c));
-        p = dom.pager();
-        ui.ptext.textContent = `${p ? `Page ${p.page} / ${p.total} · ` : ""}${plural(stats.sold, "carte")} vendue${stats.sold > 1 ? "s" : ""}`;
+        ui.ptext.textContent = `Page ${p.page} / ${p.total} · ${plural(stats.sold, "carte")} vendue${stats.sold > 1 ? "s" : ""}`;
         if (!sell.length) {
-          if (p && p.page < p.total) {
-            await turnPage(job, p.next, p.page + 1);
+          if (await hasNextPage(job)) {
+            p = await turnPage(job, 1);
             continue;
           }
           break;
@@ -1170,6 +1254,7 @@
               "Pose dans le jeu toutes les étiquettes suggérées, page par page. Seules les étiquettes qui existent déjà dans le jeu sont posées. " +
               "Un clic ou une touche ailleurs que dans ce panneau arrête tout."),
             ref("tagBtn", h("button", { class: "btn accent", onclick: () => runAutoTag() }, "Étiqueter toute la collection")),
+            ref("tagRestart", h("button", { class: "link", hidden: true, onclick: () => runAutoTag(false, true) }, "Recommencer depuis la page 1")),
             ref("tagStop", h("button", { class: "btn", hidden: true, onclick: stopTagging }, "Arrêter l'étiquetage"))),
           h("section", {},
             h("h4", {}, "Vendre les cartes sans étiquette"),
@@ -1295,6 +1380,10 @@
     ui.stopBtn.hidden = !scanning;
     ui.tagBtn.hidden = busy;
     ui.tagStop.hidden = !tagging;
+    // Reprise d'un étiquetage interrompu (vérifiée au lancement : même nombre de pages).
+    const resume = tagResume ? resumePage(tagResume.total) : null;
+    ui.tagBtn.textContent = resume ? `Reprendre l'étiquetage (page ${resume} / ${tagResume.total})` : "Étiqueter toute la collection";
+    ui.tagRestart.hidden = busy || !resume;
     const chosen = new Set(s.sellRarities || []);
     for (const chip of ui.sellChips.children) chip.classList.toggle("on", chosen.has(chip.dataset.r));
     ui.sellKeep.checked = s.sellKeep !== false;

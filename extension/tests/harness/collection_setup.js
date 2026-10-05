@@ -51,6 +51,51 @@
     pagerTexts.forEach((s) => (s.textContent = total > 1 ? `Page ${page} / ${total}` : ""));
     buttons.forEach((b) => (b.disabled = /Précédent/.test(b.textContent) ? page === 1 : page === total));
   }
+
+  // --- Rechargements, comme sur le site (relevés le 07/10/2026) -------------------------
+  // Chaque action qui change la liste la recharge : d'abord un délai sans aucun signe (les
+  // anciennes cartes restent affichées et cliquables), puis le chargement (grille estompée,
+  // « Chargement… » et icône qui tourne dans la pagination, boutons désactivés,
+  // « Actualisation… » dans la barre de sélection), puis les nouvelles cartes. La requête la
+  // plus récente l'emporte.
+  const QUIET = 500; // ms, comme le site (~0,5 à 1 s)
+  const LOAD = 1500; // ms (le site : 2 à 3 s)
+  // Le total de pages vient d'une requête séparée, refaite seulement en page 1, qui arrive
+  // après les cartes : en attendant, « Page 1 / Y » et « Suivant » restent sur l'ancien total.
+  const STATS_LAG = 1200;
+  let reloadId = 0;
+  let loading = false;
+  window.__reloads = 0;
+  function setLoading(on) {
+    loading = on;
+    grid.classList.toggle("opacity-40", on);
+    grid.classList.toggle("pointer-events-none", on);
+    if (on) {
+      pagerTexts.forEach((s) => {
+        s.textContent = "Chargement…";
+        const spin = document.createElement("span");
+        spin.className = "sim-spin animate-spin";
+        s.before(spin);
+      });
+      buttons.forEach((b) => (b.disabled = true));
+    } else {
+      document.querySelectorAll(".sim-spin").forEach((s) => s.remove());
+    }
+    renderBar();
+  }
+  function reload() {
+    const id = ++reloadId;
+    window.__reloads++;
+    setTimeout(() => {
+      if (id !== reloadId) return;
+      setLoading(true);
+      setTimeout(() => {
+        if (id !== reloadId) return;
+        setLoading(false);
+        render(page === 1);
+      }, LOAD);
+    }, QUIET);
+  }
   // --- Mode sélection et étiquetage (relevés sur le site le 02/10/2026) ---------------
   // Étiquettes « existant dans le jeu » : pas de Ski ni de Shiny, qui doivent être sautées.
   const GAME_TAGS = {
@@ -91,6 +136,8 @@
   selBtn.addEventListener("click", () => setTimeout(() => {
     selecting = !selecting;
     selected.clear();
+    const toast = document.getElementById("sim-toast");
+    if (selecting && toast) toast.remove();
     selBtn.lastChild.textContent = selecting ? "Quitter la sélection" : "Sélectionner";
     renderBar();
   }, 120));
@@ -113,10 +160,13 @@
       bar.className = "fixed bottom-4 z-[80] flex flex-col";
       document.body.append(bar);
     }
-    const n = selected.size;
-    bar.innerHTML = `<div><span>${n}</span><span>${n > 1 ? "cartes sélectionnées" : "carte sélectionnée"}</span></div>` +
-      `<div><button type="button">Tout sélectionner (page)</button><button type="button"${n ? "" : " disabled"}>Étiqueter</button>` +
-      `<button type="button" disabled>Retirer l'étiquette</button><button type="button"${n ? "" : " disabled"}>Défausser (+${n})</button></div>`;
+    const shown = new Set([...grid.children].map(titleOf));
+    const n = [...selected].filter((t) => shown.has(t)).length;
+    const off = !n || loading ? " disabled" : "";
+    bar.innerHTML = (loading ? "<div><span>Actualisation…</span></div>"
+      : `<div><span>${n}</span><span>${n > 1 ? "cartes sélectionnées" : "carte sélectionnée"}</span></div>`) +
+      `<div><button type="button"${loading ? " disabled" : ""}>Tout sélectionner (page)</button><button type="button"${off}>Étiqueter</button>` +
+      `<button type="button" disabled>Retirer l'étiquette</button><button type="button"${off}>Défausser (+${n})</button></div>`;
     const [all, tag, , discard] = bar.querySelectorAll("button");
     all.addEventListener("click", () => {
       for (const root of grid.children) selected.add(titleOf(root));
@@ -160,12 +210,12 @@
         if (!selected.has(t) || tagsOf(root).includes(tag)) continue;
         if (!added.has(t)) added.set(t, new Set());
         added.get(t).add(tag);
-        addChips(root);
         n++;
       }
       window.__applied.push({ page, tag, titles: [...selected] });
       m.querySelector(".sim-body").innerHTML = `<p><span>${n}</span> ${n > 1 ? "cartes étiquetées" : "carte étiquetée"}.</p><button type="button">Terminé</button>`;
       m.querySelector(".sim-body button").addEventListener("click", () => m.remove());
+      reload(); // le site recharge la collection après avoir posé l'étiquette
     }, 300);
   }
 
@@ -175,10 +225,18 @@
       (!filters.rarities.size || filters.rarities.has(it.rarity)));
   }
   let empty = null;
-  function render() {
+  function render(lateTotal = false) {
     const list = visible();
-    total = Math.max(1, Math.ceil(list.length / 50));
-    if (page > total) page = total;
+    const realTotal = Math.max(1, Math.ceil(list.length / 50));
+    if (page > realTotal) page = realTotal;
+    if (lateTotal && realTotal !== total) {
+      setTimeout(() => {
+        total = realTotal;
+        if (!loading) setPager();
+      }, STATS_LAG);
+    } else {
+      total = realTotal;
+    }
     setPager();
     grid.replaceChildren(...list.slice((page - 1) * 50, page * 50).map((it) => {
       const n = template[it.t].cloneNode(true);
@@ -216,7 +274,7 @@
         filters.untagged = label === "Sans étiquette";
         tagLabel.textContent = label;
         page = 1;
-        setTimeout(render, 200);
+        reload();
       });
       li.append(b);
       ul.append(li);
@@ -230,7 +288,7 @@
       filters.rarities.has(r) ? filters.rarities.delete(r) : filters.rarities.add(r);
       chip.className = `px-3 py-1 rounded-full text-xs font-semibold ${filters.rarities.has(r) ? "ring-2" : "opacity-50"}`;
       page = 1;
-      setTimeout(render, 200);
+      reload();
     });
   }
 
@@ -261,7 +319,7 @@
       }
       const n2 = titles.length;
       toast.innerHTML = `<span>${n2} carte${n2 > 1 ? "s" : ""} défaussée${n2 > 1 ? "s" : ""} (+${n2} wikibidou${n2 > 1 ? "s" : ""}).</span>`;
-      setTimeout(render, 400);
+      reload();
     }, 300));
   }
 
@@ -270,14 +328,13 @@
     page = n;
     render();
   };
+  window.__nav = { next: 0, prev: 0 };
   buttons.forEach((b) => b.addEventListener("click", () => {
     window.__clicks = (window.__clicks || 0) + 1;
-    const next = /Suivant/.test(b.textContent) ? page + 1 : page - 1;
-    setTimeout(() => {
-      page = next;
-      setPager();
-      setTimeout(render, 120);
-    }, 200);
+    const forward = /Suivant/.test(b.textContent);
+    window.__nav[forward ? "next" : "prev"]++;
+    page += forward ? 1 : -1;
+    reload();
   }));
   setPager();
 })();

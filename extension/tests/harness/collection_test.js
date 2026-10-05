@@ -58,16 +58,26 @@
       out.filtersReset = !window.__filters.untagged && window.__filters.rarities.size === 0;
       out.clean = !!WMT.dom.selectButton() && !WMT.dom.selectionBar() && !WMT.dom.discardDialog();
     } else if (location.search.includes("autotag")) {
-      // Étiquetage automatique des 4 pages, puis vérification page par page.
+      // Étiquetage automatique des 4 pages, arrêté pendant la page 2 puis repris, puis
+      // vérification page par page.
       const t0 = Date.now();
       btn(/Étiqueter toute la collection/).click();
-      await until(() => !shadow().querySelector(".progress, [hidden]") || true, 100);
+      await until(() => window.__applied.some((a) => a.page === 2), 140000);
+      btn(/Arrêter l'étiquetage/).click();
+      out.stopped = await until(() => /Étiquetage arrêté/.test(shadow().querySelector(".note").textContent), 30000);
+      await sleep(500);
+      out.resumeLabel = btn(/^(Reprendre|Étiqueter toute)/).textContent;
+      const navBefore = { ...window.__nav };
+      btn(/^Reprendre l'étiquetage/).click();
       out.finished = await until(() => {
         const stop = btn(/Arrêter l'étiquetage/);
         const note = shadow().querySelector(".note");
         return stop && stop.hidden && note && !note.hidden && /posée/.test(note.textContent);
       }, 140000);
       out.seconds = Math.round((Date.now() - t0) / 1000);
+      out.resumeNav = { prev: window.__nav.prev - navBefore.prev, next: window.__nav.next - navBefore.next };
+      out.labelAfter = btn(/^(Reprendre|Étiqueter toute)/).textContent;
+      out.reloads = window.__reloads;
       out.note = shadow().querySelector(".note").textContent;
       out.applied = window.__applied.map((a) => `${a.page}:${a.tag}:${a.titles.length}`);
       out.discarded = window.__discarded;

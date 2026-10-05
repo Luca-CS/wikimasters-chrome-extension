@@ -49,7 +49,11 @@ recharge la page WikiMasters.
    posées : les autres (par exemple « Shiny » tant que tu ne l'as pas créée)
    sont sautées et listées à la fin. « Défausser » n'est jamais touché. Un clic
    ou une touche ailleurs que dans le panneau arrête tout. Garde l'onglet
-   visible : Chrome ralentit fortement les onglets en arrière-plan.
+   visible : Chrome ralentit fortement les onglets en arrière-plan. Si tu
+   l'arrêtes, le bouton devient « Reprendre l'étiquetage (page X / Y) » et
+   repart de la page où il s'était arrêté (« Recommencer depuis la page 1 »
+   pour tout refaire). Chaque action recharge la collection côté site (2 à 3 s) :
+   l'extension attend la fin de chaque rechargement avant de continuer.
 
 5. **Vente des cartes sans étiquette** : choisis une ou plusieurs raretés avec
    les puces du panneau, clique sur « Vendre les cartes sans étiquette… » puis

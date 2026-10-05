@@ -195,6 +195,22 @@
     return null;
   }
 
+  // --- Rechargements de la collection (relevés le 07/10/2026) ------------------------
+  // Toute action qui change la liste (page, filtre, étiquette posée, défausse) la recharge :
+  // d'abord un court délai sans aucun signe (les anciennes cartes restent affichées, la
+  // pagination reste cliquable), puis la grille passe en « opacity-40 pointer-events-none »,
+  // la pagination affiche une icône qui tourne et « Chargement… » à la place de « Page X / Y »
+  // (boutons désactivés), et la barre de sélection « Actualisation… ». Enfin les nouvelles
+  // cartes s'affichent. Lire ou cliquer pendant ce temps agit sur des cartes périmées.
+
+  /** La collection est en train de se recharger. */
+  function collectionLoading(doc = document) {
+    const main = doc.querySelector("main");
+    if (main && main.querySelector(".opacity-40.pointer-events-none, .animate-spin")) return true;
+    const bar = selectionBar(doc);
+    return !!(bar && bar.refreshing);
+  }
+
   // --- Filtres et défausse (vente contre des wikibidous), relevés le 05/10/2026 -----
   // Filtre d'étiquette : bouton [aria-label="Filtrer par étiquette"] qui ouvre une liste
   // <ul role="listbox"> (dans <body>) de <button role="option"> (« Sans étiquette »…).
@@ -234,8 +250,9 @@
       const h3 = top.querySelector("h3");
       const m = h3 && text(h3).match(/^Défausser (\d+) cartes? \?$/);
       if (!m) continue;
-      return { el: top, count: +m[1], confirm: buttonByText(top, /^Défausser$/), cancel: buttonByText(top, /^Annuler$/),
-        error: [...top.querySelectorAll("p")].map(text).find((t) => /erreur/i.test(t)) || "" };
+      // Erreur du site : texte rouge (l'avertissement « Attention : N cartes rares » l'est aussi).
+      const error = [...top.querySelectorAll('p[class*="text-red"]')].map(text).find((t) => t && !/^Attention/.test(t)) || "";
+      return { el: top, count: +m[1], confirm: buttonByText(top, /^Défausser$/), cancel: buttonByText(top, /^Annuler$/), error };
     }
     return null;
   }
@@ -412,7 +429,7 @@
   WMT.dom = {
     clean, isShinyBadge, pager, cardElements, readCard, cards, activeFilters, hexColor,
     selectButton, quitSelectionButton, selectionBar, tagModal,
-    tagFilterButton, tagFilterOptions, rarityChips, isStarred, pendingTrade, barButton, discardDialog, discardedMessage, emptyResult,
+    collectionLoading, tagFilterButton, tagFilterOptions, rarityChips, isStarred, pendingTrade, barButton, discardDialog, discardedMessage, emptyResult,
     packs, parseDuration, reveal, revealNav, isOpenButton, openButton, overlay, blockingDialog, blockingText,
     sanction, packError, firstSentence,
   };

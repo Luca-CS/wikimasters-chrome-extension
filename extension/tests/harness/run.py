@@ -133,6 +133,10 @@ SCENARIOS = [
         ("catégorisation demandée", (o.get("msgs") or [{}])[0].get("page") == "report"),
     ]),
     ("collection-autotag", "page", "/collection/?autotag", None, lambda o: [
+        ("arrêt pendant la page 2, puis « Reprendre l'étiquetage (page 2 / 4) »", o.get("stopped") is True
+            and o.get("resumeLabel") == "Reprendre l'étiquetage (page 2 / 4)"),
+        ("reprise sans revenir en arrière (2 pages en avant)", o.get("resumeNav") == {"prev": 0, "next": 2}),
+        ("reprise effacée une fois tout fini", o.get("labelAfter") == "Étiqueter toute la collection"),
         ("étiquetage terminé sur les 4 pages", o.get("finished") is True and o.get("pages") == [50, 50, 50, 50]
             and {a.split(":")[0] for a in o.get("applied", [])} == {"1", "2", "3", "4"}),
         ("plus aucune étiquette existante à poser", o.get("applied") and o.get("remaining") == []),
