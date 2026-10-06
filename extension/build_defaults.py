@@ -39,7 +39,7 @@ def rules(path: Path, offset: int = 0) -> list[dict]:
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     config = {
-        "version": 3,
+        "version": 4,
         "rules": rules(ROOT / "rules.toml"),
         "themes": rules(ROOT / "themes.toml", offset=5),
         "settings": {

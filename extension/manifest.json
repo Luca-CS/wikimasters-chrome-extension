@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WikiMasters Tagger",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Analyse ta collection WikiMasters, propose des étiquettes, les pose à ta demande, vend à ta demande les cartes sans étiquette, surligne les cartes à étiqueter et te prévient quand tes paquets sont pleins.",
   "icons": {
     "16": "icons/icon16.png",
