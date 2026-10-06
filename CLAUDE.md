@@ -109,6 +109,29 @@ Classic scripts attach to a global `WMT` namespace, with no ES modules, so the s
 - **`pages/`** holds `report` (opened with `?run=1` by the panel: Wikidata enrichment, then `core.analyze`, then three tabs), `options` (rule and theme editors, tester, settings, import/export) and `popup`. MV3 CSP forbids inline scripts, so each page has its own `.js` file. `ui.css` holds the shared WikiMasters theme: dark by default, emerald `#34d399`, Outfit and Inter, rarity colours `--C`…`--L`.
 - The contact e-mail for Wikidata's `Api-User-Agent` lives only in the extension settings and is never written to `defaults.js`.
 
+## Marketplace (`/marketplace`): notes for the market-arbitrage work (not built yet)
+
+Observed read-only on 02/10 and 06/10/2026. Nothing in the extension touches the market today, and the hard rule above still forbids it. Any market feature needs Luca's explicit scope first, written into that rule the way auto-tagging and the sale were.
+
+- **List API.** The page calls `GET /api/marketplace?page&limit&sort&mine`, which returns `{auctions[], page, limit, hasMore, selling, bidding, history, won, maxConcurrentAuctions, mine}`.
+  - An auction has `id, seller_id, card_id, base_amount, current_bid, current_bidder_id, effective_bid, listing_base_amount, base_repriced_at, end_at, status ("active"…), winner_id, final_price, created_at, settled_at, snapshot_rarity, snapshot_atk, snapshot_def, is_shiny, seller, current_bidder, winner, card, owned`.
+  - `card` has `id, rarity, atk, def, pageviews, q_score, category, wikipedia_title, image_url, is_shiny…`. Rarity comes from monthly Wikipedia pageviews: C < 50, PC 50+, R 250+, SR 1 000+, UR 5 000+, L 20 000+.
+- **Other endpoints.**
+  - `GET /api/marketplace/cards/{cardId}/sales` returns the sales history of a card. It is **Pro only** and answers `{code: "pro_required"}` otherwise.
+  - `GET /api/marketplace/mine` returns `sellingCount` and `maxConcurrentAuctions` (10 for a regular account, « Mes ventes (0/10) »).
+  - Detail page: `/marketplace/{auctionId}`.
+- **Page (DOM).**
+  - **Tabs** are client-side buttons: Parcourir, « Mes ventes (n/10) », Mes enchères, « Gagnées (n) », « Historique (n) ».
+  - **Filters:** search `input[type=search]` « Rechercher une carte… », a sort `<select>` (Récemment listées / Mise la plus basse / Mise la plus haute / Fin imminente), and L…C rarity chips.
+  - **Grid:** 50 `a.card-frame` per batch with « Charger la suite » (no « Page X / Y »). Each wraps the collection's card component, then a footer: « Mise de départ » / « Achetée pour » / « Non vendue » + price, « Durée » + timer (« 9m 12s », « 5h 58m », « Terminée »), « Vendu par X ». Owned cards carry a « Possédée » badge.
+  - **Detail page:** full extract, « Se termine dans … », a numeric bid input with `min` = minimum bid, « Miser », and « Historique des mises (N) ».
+- **Rules shown by the site.**
+  - A bid is debited from the wikibidou balance immediately and refunded in full if outbid.
+  - A bid in the last 10 s extends the auction by 60 s.
+  - Selling through « Défausser » gives 1 wikibidou per card, which is a floor value.
+  - Notifications exist for `marketplace_outbid`, `_auction_won`, `_auction_sold`, `_auction_unsold`, `_auction_midpoint_nudge` (« Enchère sans mise », together with `base_repriced_at`: the starting price is lowered when nobody bids) and `_wishlist_listed` (« Liste de souhaits »).
+- **Anti-cheat.** The site has an anti-cheat system: notification types `admin_cheat_warning` (« Contrôle anti-triche ») and `admin_sanction`, plus « Sanction anti-triche active », which restricts packs, trades **and the market**. Automated bidding is the kind of behaviour such systems target and it competes against other players. So prefer read-only tooling (price estimates, undervalued listings, alerts, a ranked shortlist) and leave every bid to Luca's own click unless he explicitly decides otherwise.
+
 ## Python CLI (`wmtag/`)
 
 The pipeline is `read_cards` → `match_card` → `classement.csv` (`;`, utf-8-sig), `a_etiqueter.md`, `suggestions.md` and `rapport.html` (`report.py`, self-contained HTML with embedded JSON). Paths default to the repo root.
