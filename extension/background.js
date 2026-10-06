@@ -1,10 +1,11 @@
 // Service worker :
 // - ouvre le rapport ou la config à la demande du content script (pas d'accès à chrome.tabs là-bas) ;
 // - rappels de paquets : à partir du dernier relevé fait sur la page Paquets, affiche le nombre
-//   estimé de paquets sur l'icône et envoie une notification quand le stock est plein.
-importScripts("lib/defaults.js", "lib/store.js", "lib/packs.js");
+//   estimé de paquets sur l'icône et envoie une notification quand le stock est plein ;
+// - collecte du marché en lecture seule, si tu l'as activée dans la config (voir lib/market.js).
+importScripts("lib/defaults.js", "lib/store.js", "lib/packs.js", "lib/market.js", "lib/marketdb.js");
 
-const { store, packs } = WMT;
+const { store, packs, market, marketdb } = WMT;
 const REPORT = chrome.runtime.getURL("pages/report.html");
 const PULLS = "https://www.wiki-masters.com/pulls";
 
@@ -114,8 +115,158 @@ chrome.notifications.onClicked.addListener((id) => {
   chrome.tabs.create({ url: PULLS });
 });
 
+// --- Collecte du marché (lecture seule) -------------------------------------------------
+// Une requête au plus par tick, à un moment tiré au hasard dans les 20 premières secondes.
+// Un 403 du site (« trop de requêtes automatisées ») met tout en pause 24 h et divise le rythme
+// par deux (market.account). Jamais d'enchère : seulement des GET sur l'API du marché.
+
+const MARKET_ALARM = "market-collect";
+const EXPORT_ALARM = "market-export";
+const EXPORT_FILE = "wikimasters-marche/collecte.json"; // dans ton dossier Téléchargements
+const SITE_TABS = ["https://www.wiki-masters.com/*", "https://wiki-masters.com/*"];
+let marketBusy = false;
+
+const marketState = async () => ({ ...market.DEFAULTS, ...(await store.get("market", {})) });
+
+async function marketSchedule() {
+  const s = await marketState();
+  if (!s.on) {
+    await chrome.alarms.clear(EXPORT_ALARM);
+    return chrome.alarms.clear(MARKET_ALARM);
+  }
+  const period = Math.max(0.5, s.everySec / 60);
+  const cur = await chrome.alarms.get(MARKET_ALARM);
+  if (!cur || cur.periodInMinutes !== period) await chrome.alarms.create(MARKET_ALARM, { periodInMinutes: period });
+  const exp = await chrome.alarms.get(EXPORT_ALARM);
+  const every = s.exportEveryH * 60;
+  if (!exp || exp.periodInMinutes !== every) await chrome.alarms.create(EXPORT_ALARM, { delayInMinutes: 15, periodInMinutes: every });
+}
+
+/**
+ * Copie des données sur le disque, pour le backtest (market/backtest.js) et le guetteur
+ * (market/watch.js). Un service worker ne peut pas créer d'URL blob : le document hors écran
+ * (pages/offscreen.html) s'en charge.
+ */
+async function marketExport() {
+  const data = await marketdb.exportAll();
+  const text = JSON.stringify({ version: 1, exportedAt: Date.now(), state: await marketState(), ...data });
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+  if (!contexts.length) {
+    await chrome.offscreen.createDocument({ url: "pages/offscreen.html", reasons: ["BLOBS"], justification: "Export des données du marché en fichier JSON" });
+  }
+  const url = await chrome.runtime.sendMessage({ target: "offscreen", type: "blobUrl", text });
+  await chrome.downloads.download({ url, filename: EXPORT_FILE, conflictAction: "overwrite", saveAs: false });
+  setTimeout(() => chrome.runtime.sendMessage({ target: "offscreen", type: "revoke", url }).catch(() => {}), 60000);
+}
+
+/** GET avec ta session : d'abord depuis le service worker, sinon par un onglet WikiMasters ouvert. */
+async function siteGet(url) {
+  const t0 = Date.now();
+  let status = 0;
+  let body = null;
+  try {
+    const r = await fetch(url, { credentials: "include", headers: { accept: "application/json" } });
+    status = r.status;
+    body = r.ok ? await r.json() : null;
+  } catch {
+    status = 0;
+  }
+  if (status === 401) {
+    const [tab] = await chrome.tabs.query({ url: SITE_TABS });
+    if (tab) {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: "marketGet", path: new URL(url).pathname + new URL(url).search });
+        if (res) ({ status, body } = res);
+      } catch {
+        /* onglet sans content script à jour : on garde le 401 */
+      }
+    }
+  }
+  return { status, body, ms: Date.now() - t0 };
+}
+
+async function marketTick() {
+  if (marketBusy) return;
+  marketBusy = true;
+  try {
+    if (!market.canRequest(await marketState(), Date.now()).ok) return;
+    await new Promise((r) => setTimeout(r, Math.random() * 20000));
+    const now = Date.now();
+    const task = market.nextTask(await marketdb.queue(now), await marketState(), now);
+    if (!task) return;
+    const res = await siteGet(market.urlFor(task));
+    const kind = market.classify(res.status);
+    let s = market.account(await marketState(), kind, Date.now());
+    await marketdb.log({ t: Date.now(), kind: task.kind, status: res.status, ms: res.ms });
+    if (kind === "ok" || kind === "gone") s = await marketApply(task, kind === "ok" ? res.body : null, s);
+    await store.set("market", s);
+    if (kind === "blocked") {
+      await notify("market-blocked", "Collecte du marché en pause", "Le site a signalé trop de requêtes automatisées : pause de 24 h, puis rythme divisé par deux.");
+    }
+  } catch (e) {
+    console.warn("[WikiMasters Tagger] collecte du marché :", e);
+  } finally {
+    marketBusy = false;
+  }
+}
+
+/** Range une réponse ; renvoie l'état (mis à jour pour une lecture de la liste). */
+async function marketApply(task, body, s) {
+  const now = Date.now();
+  if (task.kind === "list") {
+    await marketdb.addAuctions(market.sample(body && body.auctions, s, now));
+    return { ...s, lastListAt: now };
+  }
+  if (task.kind === "detail") {
+    const rec = await marketdb.get("auctions", task.id);
+    if (!rec) return s;
+    const next = body ? market.afterDetail(rec, body, now) : { ...rec, state: "gone", doneAt: now };
+    await marketdb.put("auctions", next);
+    if (next.state === "done" && market.needsSales(await marketdb.get("cards", next.card), next, s)) {
+      await marketdb.put("todo", { id: next.card, at: now });
+    }
+    return s;
+  }
+  if (body) await marketdb.put("cards", market.cardSales(task.id, body, now));
+  await marketdb.del("todo", task.id);
+  return s;
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === MARKET_ALARM) marketTick();
+  if (alarm.name === EXPORT_ALARM) marketExport().catch((e) => console.warn("[WikiMasters Tagger] export du marché :", e));
+});
+
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (!msg || msg.target === "offscreen") return;
+  if (msg.type === "marketExport") {
+    marketExport().then(() => reply({ ok: true }), (e) => reply({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === "marketStop") {
+    // Sanction anti-triche vue sur le site (content.js) : arrêt complet de la collecte.
+    marketState()
+      .then((s) => (s.on ? store.set("market", market.stop(s, msg.reason, Date.now())) : null))
+      .then(() => reply({ ok: true }));
+    return true;
+  }
+});
+
+chrome.notifications.onClicked.addListener((id) => {
+  if (id !== "market-blocked") return;
+  chrome.notifications.clear(id);
+  openPage("options", false, "#marche");
+});
+
 chrome.storage.onChanged.addListener((ch, area) => {
   if (area === "local" && (ch.packs || ch.config)) schedule();
+  if (area === "local" && ch.market) marketSchedule();
 });
-chrome.runtime.onStartup.addListener(schedule);
-chrome.runtime.onInstalled.addListener(schedule);
+chrome.runtime.onStartup.addListener(() => {
+  schedule();
+  marketSchedule();
+});
+chrome.runtime.onInstalled.addListener(() => {
+  schedule();
+  marketSchedule();
+});

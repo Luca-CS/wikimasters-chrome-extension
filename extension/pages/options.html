@@ -26,6 +26,7 @@
       <a href="#themes">Thèmes candidats</a>
       <a href="#packs">Paquets et rappels</a>
       <a href="#analyse">Analyse</a>
+      <a href="#marche">Marché</a>
       <a href="#data">Données</a>
     </nav>
 
@@ -137,6 +138,46 @@
       </div>
     </section>
 
+    <section class="group" id="marche">
+      <div class="ghead"><h2>Marché : collecte de données</h2><span class="count" id="mk-badge"></span></div>
+      <p class="d pad">
+        Lecture seule, pour le backtest et l'aide à la décision : l'extension ne mise jamais. Elle lit un échantillon
+        des nouvelles annonces, puis le résultat de chacune après sa fin, et l'historique de prix des cartes concernées.
+        Au plus une requête par intervalle, pas la nuit. Si le site signale trop de requêtes automatisées : pause de 24 h et
+        rythme divisé par deux ; un deuxième signal en 7 jours, ou une sanction anti-triche affichée, arrête tout.
+        Copie des données toutes les 3 h dans Téléchargements/wikimasters-marche/collecte.json.
+      </p>
+      <div class="form">
+        <label class="field inline">
+          <span>Collecter les données du marché<br><small>Il faut être connecté à WikiMasters dans ce navigateur.</small></span>
+          <input type="checkbox" class="switch" id="mk-on">
+        </label>
+        <label class="field inline">
+          <span>Secondes entre deux requêtes<br><small>60 par défaut. Le blocage du 06/10 est arrivé vers 7 secondes.</small></span>
+          <input type="number" min="30" max="600" step="10" id="mk-every">
+        </label>
+        <label class="field inline">
+          <span>Requêtes au plus par jour</span>
+          <input type="number" min="50" max="5000" step="50" id="mk-cap">
+        </label>
+        <label class="field inline">
+          <span>Part des cartes C, PC, R et SR suivies (%)<br><small>Les L, UR et shiny sont toujours suivies.</small></span>
+          <input type="number" min="1" max="100" step="1" id="mk-share">
+        </label>
+        <label class="field inline">
+          <span>Heures actives (de, à)<br><small>Heure locale ; 24 = minuit.</small></span>
+          <span class="row-btns tight"><input type="number" min="0" max="23" id="mk-h0"><input type="number" min="1" max="24" id="mk-h1"></span>
+        </label>
+      </div>
+      <p class="d pad" id="mk-status"></p>
+      <div class="pad"><table><tbody id="mk-log"></tbody></table></div>
+      <div class="row-btns">
+        <button class="btn" id="mk-export">Exporter maintenant</button>
+        <button class="btn danger" id="mk-clear">Vider les données du marché</button>
+        <span class="muted" id="mk-result"></span>
+      </div>
+    </section>
+
     <section class="group" id="data">
       <div class="ghead"><h2>Données</h2><span class="count" id="usage"></span></div>
       <p class="d pad" id="data-info"></p>
@@ -153,6 +194,8 @@
   <script src="../lib/defaults.js"></script>
   <script src="../lib/store.js"></script>
   <script src="../lib/packs.js"></script>
+  <script src="../lib/market.js"></script>
+  <script src="../lib/marketdb.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

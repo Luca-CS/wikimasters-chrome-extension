@@ -268,6 +268,7 @@
   /** La page affiche une sanction anti-triche : on arrête tout, sans insister. */
   function stopForSanction() {
     stopAll();
+    stopMarketForSanction();
     const message = "Le site affiche une sanction anti-triche : tout l'automatique est arrêté. Ne relance pas l'enchaînement, regarde tes messages sur le site.";
     log(message);
     note(message, "err");
@@ -1450,6 +1451,15 @@
   }
 
   let orphaned = false;
+  let ticks = 0;
+  let sanctionSent = false;
+
+  /** Une sanction anti-triche affichée arrête aussi la collecte du marché, pour de bon. */
+  function stopMarketForSanction() {
+    if (sanctionSent || orphaned) return;
+    sanctionSent = true;
+    chrome.runtime.sendMessage({ type: "marketStop", reason: "Le site affiche une sanction anti-triche : collecte du marché arrêtée." }).catch(() => {});
+  }
 
   function extensionAlive() {
     try {
@@ -1474,6 +1484,7 @@
       stopAll();
       note("L'extension a été mise à jour : recharge la page (F5) pour utiliser la nouvelle version.", "err");
     }
+    if (++ticks % 20 === 0 && !sanctionSent && document.body && dom.sanction()) stopMarketForSanction();
     const next = document.body ? routeOf() : null;
     if (next === route) return;
     if (route) unmount();
@@ -1485,6 +1496,14 @@
     if (msg && msg.type === "panel") {
       if (route) setOpen(true);
       reply({ ok: !!route });
+    }
+    // Collecte du marché : GET en lecture seule avec la session de l'onglet, quand le service
+    // worker n'a pas la session (401). Uniquement l'API du marché.
+    if (msg && msg.type === "marketGet" && !orphaned && /^\/api\/marketplace[/?]/.test(msg.path)) {
+      fetch(msg.path, { credentials: "same-origin", headers: { accept: "application/json" } })
+        .then(async (r) => reply({ status: r.status, body: r.ok ? await r.json() : null }))
+        .catch(() => reply({ status: 0, body: null }));
+      return true; // réponse asynchrone
     }
   });
 
