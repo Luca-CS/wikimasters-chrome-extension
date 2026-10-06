@@ -94,6 +94,19 @@ class TestClassify(unittest.TestCase):
         for title, desc, want in cases:
             self.assertEqual(self.tags(desc, title=title)[:1], [want], title)
 
+    def test_finance_physique_substances(self):
+        self.assertEqual(self.tags("indice boursier"), ["Finance"])
+        self.assertEqual(self.tags("banque ivoirienne"), ["Finance"])
+        self.assertEqual(self.tags("notation d'un état quantique"), ["Physique"])
+        self.assertEqual(self.tags("", title="Effet Doppler"), ["Physique"])
+        self.assertEqual(self.tags("composé chimique"), ["Substances"])
+        self.assertEqual(self.tags("médicament"), ["Substances"])
+        self.assertEqual(self.tags("drogue psychotrope"), ["Substances"])
+        # pas de faux positifs sur les sens courants
+        self.assertEqual(self.tags("composant électronique de puissance"), [])
+        self.assertEqual(self.tags("héroïne de la série"), [])
+        self.assertEqual(self.tags("cérémonie d'investiture"), [])
+
     def test_title_qualifier_counts_as_description(self):
         self.assertEqual(self.tags("", title="Angola (chanson)"), ["Musique"])
         self.assertEqual(self.tags("", title="Ouédraogo (roi)"), ["Royauté"])

@@ -49,6 +49,22 @@
     return { ...c, version: 3, rules, settings };
   }
 
+  /**
+   * v4 : nouvelles étiquettes par défaut (Finance, Physique, Substances), ajoutées juste avant
+   * l'étiquette shiny si ta config ne les a pas déjà. Seulement elles : une étiquette par défaut
+   * que tu as supprimée ne revient pas, et tes étiquettes existantes ne bougent pas.
+   */
+  const NEW_IN_V4 = ["Finance", "Physique", "Substances"];
+
+  function toV4(c, dflt) {
+    const names = new Set(c.rules.map((r) => r.name));
+    const missing = dflt.rules.filter((r) => NEW_IN_V4.includes(r.name) && !names.has(r.name));
+    const rules = [...c.rules];
+    const at = rules.findIndex((r) => r.shiny);
+    rules.splice(at < 0 ? rules.length : at, 0, ...missing);
+    return { ...c, version: 4, rules };
+  }
+
   /** Config complète ; initialisée avec defaults.js au premier lancement, puis migrée. */
   async function getConfig() {
     const dflt = WMT.defaults.config();
@@ -66,6 +82,10 @@
     }
     if (c.version < 3) {
       c = toV3(c, dflt);
+      await set("config", c);
+    }
+    if (c.version < 4) {
+      c = toV4(c, dflt);
       await set("config", c);
     }
     return { ...c, settings: { ...dflt.settings, ...c.settings } };

@@ -26,9 +26,9 @@ const { store, defaults } = globalThis.WMT;
 test("premier lancement : config par défaut enregistrée", async () => {
   delete data.config;
   const c = await store.getConfig();
-  assert.equal(c.version, 3);
+  assert.equal(c.version, 4);
   assert.equal(c.settings.revealDelay, 200);
-  assert.equal(data.config.version, 3);
+  assert.equal(data.config.version, 4);
   assert.ok(c.rules.some((r) => r.shiny && r.name === "Shiny"));
 });
 
@@ -38,7 +38,7 @@ test("migration v1 → v2 : l'ancien délai par défaut (1,5 s) passe à 0,2 s",
   const c = await store.getConfig();
   assert.equal(c.settings.revealDelay, 200);
   assert.equal(c.settings.accountType, "pro"); // les autres réglages sont conservés
-  assert.equal(data.config.version, 3);
+  assert.equal(data.config.version, 4);
 });
 
 // Règle Ski telle qu'elle était dans les valeurs par défaut de la v2.
@@ -85,4 +85,17 @@ test("migration v1 → v2 : un délai choisi à la main est conservé", async ()
   const old = defaults.config();
   data.config = { ...old, version: 1, settings: { ...old.settings, revealDelay: 900 } };
   assert.equal((await store.getConfig()).settings.revealDelay, 900);
+});
+
+test("migration v3 → v4 : Finance, Physique et Substances ajoutées avant Shiny, tes étiquettes intactes", async () => {
+  const c = defaults.config();
+  const mine = { name: "Maths", color: "#010203", keywords: ["mon motif"] };
+  const shiny = c.rules.find((r) => r.shiny);
+  data.config = { ...c, version: 3, rules: [mine, { name: "Finance", color: "#999999", keywords: ["perso"] }, shiny] };
+  const got = await store.getConfig();
+  assert.equal(got.version, 4);
+  assert.deepEqual(got.rules.map((r) => r.name), ["Maths", "Finance", "Physique", "Substances", "Shiny"]);
+  assert.deepEqual(got.rules[0].keywords, ["mon motif"]); // étiquette existante inchangée
+  assert.deepEqual(got.rules[1].keywords, ["perso"]); // Finance déjà présente : gardée telle quelle
+  assert.ok(got.rules[2].keywords.length > 5);
 });
