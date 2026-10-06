@@ -8,7 +8,8 @@
 // Une seule notification par événement (cache/market/watch-state.json). Journal : cache/market/watch.log.
 //
 //   node market/watch.js                 une vérification
-//   node market/watch.js --loop          une vérification par heure, sans fin
+//   node market/watch.js --loop          une vérification par heure, jusqu'à l'objectif atteint
+//   node market/watch.js --test-notify   affiche une notification de test
 //   options : --file <export.json> --target <nombre d'enchères terminées, 1000 par défaut>
 const fs = require("node:fs");
 const path = require("node:path");
@@ -103,9 +104,11 @@ function safeCheck() {
   }
 }
 
-if (require.main === module) {
-  safeCheck();
-  if (process.argv.includes("--loop")) {
+if (require.main === module && process.argv.includes("--test-notify")) {
+  notify("Test du guetteur WikiMasters", "Les notifications fonctionnent.");
+} else if (require.main === module) {
+  const first = safeCheck();
+  if (process.argv.includes("--loop") && !(first && first.doneAt)) {
     setInterval(() => {
       const st = safeCheck();
       if (st && st.doneAt) process.exit(0); // objectif atteint : le guetteur s'arrête
