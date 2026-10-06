@@ -59,6 +59,7 @@ function ruleEditor(key, i, open) {
   const tkw = $("textarea", { rows: 7, spellcheck: "false" });
   kw.value = (rule.keywords || []).join("\n");
   tkw.value = (rule.titleKeywords || []).join("\n");
+  const crossBox = $("input", { type: "checkbox", class: "switch", checked: !!rule.cross });
 
   const details = $("details", { class: "rule", "data-i": String(i), open },
     $("summary", {}, dot, label, count),
@@ -77,6 +78,10 @@ function ruleEditor(key, i, open) {
         : $("div", { class: "cols" },
           $("label", {}, "Mots-clés cherchés dans la description, la précision du titre entre parenthèses (et Wikidata), un par ligne", kw),
           $("label", {}, "Mots-clés cherchés dans le titre", tkw)),
+      isTheme || rule.shiny ? null : $("label", { class: "field inline" },
+        $("span", {}, "Transversale", $("br"),
+          $("small", {}, "Posée en plus de la catégorie, même sur une carte déjà étiquetée, sans compter comme catégorie. Seulement sur les indices de la carte (pas Wikidata).")),
+        crossBox),
       isTheme ? null : $("div", { class: "d" },
         rule.colorLocked ? "Couleur choisie à la main." : "Couleur reprise automatiquement du jeu dès que l'étiquette apparaît sur une carte."),
       err));
@@ -108,6 +113,7 @@ function ruleEditor(key, i, open) {
   color.addEventListener("input", () => update(isTheme ? { color: color.value } : { color: color.value, colorLocked: true }));
   kw.addEventListener("input", () => update({ keywords: lines(kw.value) }));
   tkw.addEventListener("input", () => update({ titleKeywords: lines(tkw.value) }));
+  crossBox.addEventListener("change", () => update({ cross: crossBox.checked }));
   refreshHead();
   return details;
 }

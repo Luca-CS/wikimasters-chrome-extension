@@ -56,14 +56,21 @@
    */
   const NEW_IN_V4 = ["Finance", "Physique", "Substances"];
 
-  function toV4(c, dflt) {
+  /** Ajoute les étiquettes par défaut `added` absentes de ta config, juste avant l'étiquette shiny. */
+  function insertDefaults(c, dflt, added, version) {
     const names = new Set(c.rules.map((r) => r.name));
-    const missing = dflt.rules.filter((r) => NEW_IN_V4.includes(r.name) && !names.has(r.name));
+    const missing = dflt.rules.filter((r) => added.includes(r.name) && !names.has(r.name));
     const rules = [...c.rules];
     const at = rules.findIndex((r) => r.shiny);
     rules.splice(at < 0 ? rules.length : at, 0, ...missing);
-    return { ...c, version: 4, rules };
+    return { ...c, version, rules };
   }
+
+  const toV4 = (c, dflt) => insertDefaults(c, dflt, NEW_IN_V4, 4);
+
+  /** v5 : étiquette transversale « Plateau de Saclay » (écoles, labos, communes, personnes). */
+  const NEW_IN_V5 = ["Plateau de Saclay"];
+  const toV5 = (c, dflt) => insertDefaults(c, dflt, NEW_IN_V5, 5);
 
   /** Config complète ; initialisée avec defaults.js au premier lancement, puis migrée. */
   async function getConfig() {
@@ -86,6 +93,10 @@
     }
     if (c.version < 4) {
       c = toV4(c, dflt);
+      await set("config", c);
+    }
+    if (c.version < 5) {
+      c = toV5(c, dflt);
       await set("config", c);
     }
     return { ...c, settings: { ...dflt.settings, ...c.settings } };

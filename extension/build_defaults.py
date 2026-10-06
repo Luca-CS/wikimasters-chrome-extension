@@ -28,6 +28,8 @@ def rule(name: str, spec: dict, color: str) -> dict:
            "keywords": spec.get("keywords", []), "titleKeywords": spec.get("title_keywords", [])}
     if spec.get("shiny"):
         out["shiny"] = True
+    if spec.get("cross"):
+        out["cross"] = True
     return out
 
 
@@ -39,7 +41,7 @@ def rules(path: Path, offset: int = 0) -> list[dict]:
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     config = {
-        "version": 4,
+        "version": 5,
         "rules": rules(ROOT / "rules.toml"),
         "themes": rules(ROOT / "themes.toml", offset=5),
         "settings": {

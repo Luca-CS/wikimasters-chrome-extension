@@ -27,6 +27,7 @@ class TagRule:
     raw_keywords: list[str] = field(default_factory=list)
     raw_title_keywords: list[str] = field(default_factory=list)
     shiny: bool = False  # étiquette posée sur toutes les cartes shiny, en plus de leur catégorie
+    cross: bool = False  # étiquette transversale : en plus de la catégorie, sur indices propres seulement
 
 
 def _compile(patterns: list[str]) -> list[re.Pattern]:
@@ -50,6 +51,7 @@ def load_rules(path: Path) -> list[TagRule]:
                 raw_keywords=kw,
                 raw_title_keywords=spec.get("title_keywords", []),
                 shiny=bool(spec.get("shiny", False)),
+                cross=bool(spec.get("cross", False)),
             )
         )
     return rules
@@ -81,17 +83,25 @@ def match_card(card: Card, rules: list[TagRule], extra_text: str = "",
     Sans indice propre, on se rabat sur Wikidata ; si la carte a une description, seulement
     sur sa nature (nature_text, P31) : les occupations (P106) y sont trop bruitées
     (un écrivain « scénariste » à ses heures). Les règles shiny matchent les cartes shiny.
+    Les règles transversales (cross) viennent après les catégories, sur indices propres seulement.
     """
     desc = norm(card.description)
     qual = norm(qualifier(card.title))
     title = norm(card.title)
     extra = norm(extra_text)
     nature = extra if nature_text is None or not desc else norm(nature_text)
-    own_found, wd_found, shiny = [], [], []
+    own_found, wd_found, cross, shiny = [], [], [], []
     for rule in rules:
         if rule.shiny:
             if card.shiny:
                 shiny.append(Match(rule.name, 1, ["shiny"]))
+            continue
+        if rule.cross:
+            hits = {m.group(0) for p in rule.keywords
+                    for m in [p.search(desc) or (p.search(qual) if qual else None)] if m}
+            hits |= {f"titre:{m.group(0)}" for p in rule.title_keywords for m in [p.search(title)] if m}
+            if hits:
+                cross.append(Match(rule.name, len(hits), sorted(hits)))
             continue
         own, wd, fallback = set(), set(), set()
         for p in rule.keywords:
@@ -116,23 +126,24 @@ def match_card(card: Card, rules: list[TagRule], extra_text: str = "",
             wd_found.append(Match(rule.name, len(fallback), sorted(fallback)))
     out = own_found or wd_found
     out.sort(key=lambda m: -m.score)  # tri stable => ordre du fichier en cas d'égalité
-    return out + shiny
+    return out + cross + shiny
 
 
 def shiny_names(rules: list[TagRule]) -> set[str]:
-    return {r.name for r in rules if r.shiny}
+    """Étiquettes qui ne classent pas la carte : shiny et transversales."""
+    return {r.name for r in rules if r.shiny or r.cross}
 
 
 def category_tags(card: Card, rules: list[TagRule]) -> list[str]:
-    """Étiquettes posées qui classent la carte (toutes sauf les étiquettes shiny)."""
+    """Étiquettes posées qui classent la carte (toutes sauf les shiny et transversales)."""
     special = shiny_names(rules)
     return [t for t in card.tags if t not in special]
 
 
 def suggest(card: Card, rules: list[TagRule], extra_text: str = "",
             nature_text: str | None = None) -> list[Match]:
-    """Étiquettes à poser : la catégorie si la carte n'en a pas encore, et l'étiquette shiny
-    sur une carte shiny qui ne l'a pas, même déjà classée."""
+    """Étiquettes à poser : la catégorie si la carte n'en a pas encore, et les étiquettes shiny
+    et transversales qui lui manquent, même déjà classée."""
     special = shiny_names(rules)
     classified = bool(category_tags(card, rules))
     return [m for m in match_card(card, rules, extra_text, nature_text)
@@ -219,9 +230,9 @@ def suggest_themes(
 def agreement(cards: list[Card], rules: list[TagRule], wikidata_text: dict[str, str],
               wikidata_nature: dict[str, str] | None = None):
     """Compare les suggestions aux étiquettes que tu as déjà posées à la main
-    (catégories seulement : l'étiquette shiny ne dit rien des règles).
+    (catégories seulement : les étiquettes shiny et transversales ne disent rien des règles).
     Renvoie (n_cartes_étiquetées, n_d'accord, liste des désaccords)."""
-    active = {r.name for r in rules if not r.shiny}
+    active = {r.name for r in rules if not r.shiny and not r.cross}
     tagged = [c for c in cards if any(t in active for t in c.tags)]
     ok, misses = 0, []
     for c in tagged:

@@ -41,6 +41,7 @@
       name: r.name,
       color: r.color,
       shiny: !!r.shiny,
+      cross: !!r.cross,
       raw: r,
       kw: (r.keywords || []).flatMap((p) => (patternError(p) ? [] : [compilePattern(p)])),
       tkw: (r.titleKeywords || []).flatMap((p) => (patternError(p) ? [] : [compilePattern(p)])),
@@ -59,7 +60,8 @@
    * (extraText = nature + occupations) ne fait que compléter : si une règle a un indice propre,
    * celles qui n'ont que Wikidata sont écartées. Sans indice propre, on se rabat sur Wikidata ;
    * si la carte a une description, seulement sur sa nature (natureText, P31), les occupations
-   * étant trop bruitées. Les règles shiny matchent les cartes shiny.
+   * étant trop bruitées. Les règles shiny matchent les cartes shiny. Les règles transversales
+   * (cross) viennent après les catégories, sur indices propres seulement.
    */
   function matchCard(card, rules, extraText = "", natureText = null) {
     const desc = norm(card.desc);
@@ -69,10 +71,24 @@
     const nature = natureText == null || !desc ? extra : norm(natureText);
     const ownFound = [];
     const wdFound = [];
+    const cross = [];
     const shiny = [];
     for (const rule of rules) {
       if (rule.shiny) {
         if (card.shiny) shiny.push({ tag: rule.name, score: 1, hits: ["shiny"] });
+        continue;
+      }
+      if (rule.cross) {
+        const hits = new Set();
+        for (const re of rule.kw) {
+          const m = re.exec(desc) || (qual ? re.exec(qual) : null);
+          if (m) hits.add(m[0]);
+        }
+        for (const re of rule.tkw) {
+          const m = re.exec(title);
+          if (m) hits.add("titre:" + m[0]);
+        }
+        if (hits.size) cross.push({ tag: rule.name, score: hits.size, hits: [...hits].sort() });
         continue;
       }
       const own = new Set();
@@ -104,20 +120,21 @@
     }
     const out = ownFound.length ? ownFound : wdFound;
     out.sort((a, b) => b.score - a.score); // tri stable => ordre des règles en cas d'égalité
-    return out.concat(shiny);
+    return out.concat(cross, shiny);
   }
 
-  const shinyNames = (rules) => new Set(rules.filter((r) => r.shiny || (r.raw && r.raw.shiny)).map((r) => r.name));
+  /** Étiquettes qui ne classent pas la carte : shiny et transversales. */
+  const shinyNames = (rules) => new Set(rules.filter((r) => r.shiny || r.cross || (r.raw && (r.raw.shiny || r.raw.cross))).map((r) => r.name));
 
-  /** Étiquettes posées qui classent la carte (toutes sauf les étiquettes shiny). */
+  /** Étiquettes posées qui classent la carte (toutes sauf les shiny et transversales). */
   function categoryTags(card, rules) {
     const special = shinyNames(rules);
     return card.tags.filter((t) => !special.has(t));
   }
 
   /**
-   * Étiquettes à poser : la catégorie si la carte n'en a pas encore, et l'étiquette shiny sur
-   * une carte shiny qui ne l'a pas, même déjà classée.
+   * Étiquettes à poser : la catégorie si la carte n'en a pas encore, et les étiquettes shiny et
+   * transversales qui lui manquent, même déjà classée.
    */
   function suggest(card, rules, extraText = "", natureText = null) {
     const special = shinyNames(rules);
@@ -197,7 +214,7 @@
 
   /** Compare les suggestions aux étiquettes déjà posées à la main (catégories seulement). */
   function agreement(cards, rules, wdTextOf, wdNatureOf = () => null) {
-    const active = new Set(rules.filter((r) => !r.shiny).map((r) => r.name));
+    const active = new Set(rules.filter((r) => !r.shiny && !r.cross).map((r) => r.name));
     const tagged = cards.filter((c) => c.tags.some((t) => active.has(t)));
     let ok = 0;
     const misses = [];

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from wmtag import __main__ as cli
-from wmtag.classify import agreement, head_word, load_rules, match_card, suggest, suggest_themes
+from wmtag.classify import agreement, category_tags, head_word, load_rules, match_card, suggest, suggest_themes
 from wmtag.parser import Card, parse_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +137,26 @@ class TestClassify(unittest.TestCase):
         self.assertEqual([m.tag for m in suggest(shiny, self.rules)], ["Shiny"])
         shiny.tags = ["Shiny"]  # Shiny seule ne classe pas la carte
         self.assertEqual([m.tag for m in suggest(shiny, self.rules)], ["Cinéma/Séries/Acteurs"])
+
+    def test_cross_tag(self):
+        """Plateau de Saclay : transversale, en plus de la catégorie, sur indices propres."""
+        tags = lambda c, wd="": [m.tag for m in suggest(c, self.rules, wd)]  # noqa: E731
+        fert = Card(title="Albert Fert", rarity="UR", description="physicien français")
+        self.assertEqual(tags(fert), ["Physique", "Plateau de Saclay"])
+        fert.tags = ["Physique"]  # déjà classé : il ne manque que Plateau de Saclay
+        self.assertEqual(tags(fert), ["Plateau de Saclay"])
+        x = Card(title="École polytechnique", rarity="UR", description="école d'ingénieurs française")
+        x.tags = ["Plateau de Saclay"]  # la transversale seule ne classe pas la carte
+        self.assertEqual(category_tags(x, self.rules), [])
+        for title in ["Orsay", "Gif-sur-Yvette", "Massy (Essonne)", "Plateau de Saclay", "Université Paris-Saclay",
+                      "CentraleSupélec", "Synchrotron SOLEIL", "Institut des hautes études scientifiques",
+                      "Yvette (rivière)", "Ngô Bảo Châu", "Anne L'Huillier", "Gare de Massy-Palaiseau"]:
+            self.assertIn("Plateau de Saclay", tags(Card(title=title, rarity="R")), title)
+        for title in ["Musée d'Orsay", "Massy (Seine-Maritime)", "Buc", "École polytechnique fédérale de Lausanne",
+                      "Gare d'Orsay", "Saint-Aubin", "Lausanne"]:
+            self.assertNotIn("Plateau de Saclay", tags(Card(title=title, rarity="R")), title)
+        # Wikidata ne suffit pas pour une transversale
+        self.assertEqual(tags(Card(title="Untel", rarity="C"), "université Paris-Saclay"), [])
         plain = Card(title="X", rarity="C", description="actrice française", tags=["Musique"])
         self.assertEqual(suggest(plain, self.rules), [])
 
@@ -206,6 +226,8 @@ class TestExtensionParity(unittest.TestCase):
             Card(title="Charlot", rarity="SR", description="personnage", tags=["Cinéma/Séries/Acteurs"], shiny=True),
             Card(title="Chris Offutt", rarity="C", description="écrivain américain"),
             Card(title="Offertorium", rarity="C", description="œuvre de Sofia Goubaïdoulina"),
+            Card(title="Albert Fert", rarity="UR", description="physicien français", tags=["Physique"]),
+            Card(title="Massy (Essonne)", rarity="R", description="commune française du département de l'Essonne"),
         ]
         rules, themes = load_rules(ROOT / "rules.toml"), load_rules(ROOT / "themes.toml")
         wd = {"titles": {"Lee Pace": {"qid": "Q1", "P31": ["Q5"], "P106": ["Q33999", "Q639669"]},
@@ -220,7 +242,7 @@ class TestExtensionParity(unittest.TestCase):
         wd_nature = {c.title: " ; ".join(wd["labels"][q] for q in wd["titles"].get(c.title, {}).get("P31", []))
                      for c in cards}
         js_rule = lambda r: {"name": r.name, "keywords": r.raw_keywords, "titleKeywords": r.raw_title_keywords,
-                             "shiny": r.shiny}
+                             "shiny": r.shiny, "cross": r.cross}
         payload = {
             "cards": [{"title": c.title, "desc": c.description, "tags": c.tags, "rarity": c.rarity, "shiny": c.shiny}
                       for c in cards],
@@ -237,10 +259,11 @@ class TestExtensionParity(unittest.TestCase):
             self.assertEqual(got, pick(match_card(c, rules, wd_text[c.title])), c.title)
             self.assertEqual(got_sugg, pick(suggest(c, rules, wd_text[c.title], wd_nature[c.title])), c.title)
         self.assertEqual(out["headWords"], [head_word(c.description) for c in cards])
-        self.assertEqual([m["tag"] for m in out["suggestions"][-4]], ["Cinéma/Séries/Acteurs", "Shiny"])
-        self.assertEqual(out["suggestions"][-2], [])  # écrivain : l'occupation « scénariste » ne suffit pas
+        self.assertEqual([m["tag"] for m in out["suggestions"][-6]], ["Cinéma/Séries/Acteurs", "Shiny"])
+        self.assertEqual(out["suggestions"][-4], [])  # écrivain : l'occupation « scénariste » ne suffit pas
+        self.assertEqual([m["tag"] for m in out["suggestions"][-2]], ["Plateau de Saclay"])  # déjà en Physique
 
-        specials = {r.name for r in rules if r.shiny}
+        specials = {r.name for r in rules if r.shiny or r.cross}
         unmatched = [c for c in cards
                      if not [t for t in c.tags if t not in specials]
                      and all(m.tag in specials for m in suggest(c, rules, wd_text[c.title], wd_nature[c.title]))]
